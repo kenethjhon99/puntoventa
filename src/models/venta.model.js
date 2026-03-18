@@ -65,6 +65,13 @@ export const anularDetalle = async ({ id_venta, id_detalle, cantidad, motivo, id
       [`Anulación venta #${id_venta} detalle #${id_detalle}`, cantidad, antes, despues, det.id_producto, id_bodega, id_usuario]
     );
 
+    await client.query(
+      `INSERT INTO "Detalle_venta_anulacion"
+       (id_venta, id_detalle, id_producto, cantidad, motivo, id_usuario)
+       VALUES ($1, $2, $3, $4, $5, $6)`,
+      [id_venta, id_detalle, det.id_producto, cantidad, motivo ?? null, id_usuario]
+    );
+
     // 5) Recalcular total de venta
     const rTotal = await client.query(
       `SELECT COALESCE(SUM((cantidad - cantidad_anulada) * precio_unitario), 0) AS total
@@ -106,21 +113,173 @@ export const anularDetalle = async ({ id_venta, id_detalle, cantidad, motivo, id
   }
 };
 
-export const crearVenta = async ({ id_usuario, id_sucursal = 1, tipo_venta, metodo_pago, items, id_bodega = 1 }) => {
+export const anularVentaCompleta = async ({
+  id_venta,
+  motivo,
+  id_usuario,
+  id_bodega = 1,
+}) => {
   const client = await pool.connect();
 
   try {
     await client.query("BEGIN");
 
     const rVenta = await client.query(
-  `INSERT INTO "Venta"(fecha, total, tipo_venta, metodo_pago, id_sucursal, id_usuario, estado)
-   VALUES (now(), 0, $1, $2, $3, $4, 'COMPLETADA')
+      `
+        SELECT id_venta, estado
+        FROM "Venta"
+        WHERE id_venta = $1
+        FOR UPDATE
+      `,
+      [id_venta]
+    );
+
+    if (rVenta.rowCount === 0) {
+      throw new Error("Venta no encontrada");
+    }
+
+    if (rVenta.rows[0].estado === "ANULADA") {
+      throw new Error("La venta ya se encuentra anulada");
+    }
+
+    const rDetalles = await client.query(
+      `
+        SELECT id_detalle, id_producto, cantidad, cantidad_anulada, precio_unitario
+        FROM "Detalle_venta"
+        WHERE id_venta = $1
+        ORDER BY id_detalle ASC
+        FOR UPDATE
+      `,
+      [id_venta]
+    );
+
+    if (rDetalles.rowCount === 0) {
+      throw new Error("La venta no tiene detalles para anular");
+    }
+
+    for (const detalle of rDetalles.rows) {
+      const cantidadOriginal = Number(detalle.cantidad) || 0;
+      const cantidadAnulada = Number(detalle.cantidad_anulada) || 0;
+      const cantidadPendiente = cantidadOriginal - cantidadAnulada;
+
+      if (cantidadPendiente <= 0) {
+        continue;
+      }
+
+      const rStock = await client.query(
+        `
+          SELECT existencia
+          FROM "Stock_producto"
+          WHERE id_producto = $1 AND id_bodega = $2
+          FOR UPDATE
+        `,
+        [detalle.id_producto, id_bodega]
+      );
+
+      if (rStock.rowCount === 0) {
+        throw new Error(`No existe stock para el producto ${detalle.id_producto} en la bodega`);
+      }
+
+      const antes = Number(rStock.rows[0].existencia);
+      const despues = antes + cantidadPendiente;
+
+      await client.query(
+        `
+          UPDATE "Stock_producto"
+          SET existencia = $1
+          WHERE id_producto = $2 AND id_bodega = $3
+        `,
+        [despues, detalle.id_producto, id_bodega]
+      );
+
+      await client.query(
+        `
+          INSERT INTO "Movimiento_stock"
+          (tipo, motivo, cantidad, existencia_antes, existencia_despues, id_producto, id_bodega, id_usuario)
+          VALUES ('ENTRADA', $1, $2, $3, $4, $5, $6, $7)
+        `,
+        [`Anulacion total venta #${id_venta}`, cantidadPendiente, antes, despues, detalle.id_producto, id_bodega, id_usuario]
+      );
+
+      await client.query(
+        `
+          UPDATE "Detalle_venta"
+          SET cantidad_anulada = cantidad,
+              estado = 'ANULADO',
+              anulada_en = now(),
+              anulada_por = $1,
+              motivo_anulacion = $2
+          WHERE id_detalle = $3
+        `,
+        [id_usuario, motivo ?? null, detalle.id_detalle]
+      );
+
+      await client.query(
+        `
+          INSERT INTO "Detalle_venta_anulacion"
+          (id_venta, id_detalle, id_producto, cantidad, motivo, id_usuario)
+          VALUES ($1, $2, $3, $4, $5, $6)
+        `,
+        [
+          id_venta,
+          detalle.id_detalle,
+          detalle.id_producto,
+          cantidadPendiente,
+          motivo ?? null,
+          id_usuario,
+        ]
+      );
+    }
+
+    const rVentaActualizada = await client.query(
+      `
+        UPDATE "Venta"
+        SET total = 0,
+            utilidad_total = 0,
+            estado = 'ANULADA',
+            anulada_en = now(),
+            anulada_por = $1,
+            motivo_anulacion = $2
+        WHERE id_venta = $3
+        RETURNING *
+      `,
+      [id_usuario, motivo ?? null, id_venta]
+    );
+
+    await client.query("COMMIT");
+
+    return rVentaActualizada.rows[0];
+  } catch (error) {
+    await client.query("ROLLBACK");
+    throw error;
+  } finally {
+    client.release();
+  }
+};
+
+export const crearVenta = async ({
+  id_usuario,
+  id_sucursal = 1,
+  id_cliente = null,
+  tipo_venta,
+  metodo_pago,
+  items,
+  id_bodega = 1,
+}) => {
+  const client = await pool.connect();
+
+  try {
+    await client.query("BEGIN");
+
+    const rVenta = await client.query(
+  `INSERT INTO "Venta"(fecha, total, tipo_venta, metodo_pago, id_sucursal, id_usuario, id_cliente, estado)
+   VALUES (now(), 0, $1, $2, $3, $4, $5, 'COMPLETADA')
    RETURNING id_venta,
             (fecha AT TIME ZONE 'America/Guatemala') AS fecha,
-            total, tipo_venta, metodo_pago, id_sucursal, id_usuario, estado,
+            total, tipo_venta, metodo_pago, id_sucursal, id_usuario, id_cliente, estado,
             (anulada_en AT TIME ZONE 'America/Guatemala') AS anulada_en,
             anulada_por, motivo_anulacion`,
-  [tipo_venta ?? "CONTADO", metodo_pago ?? "EFECTIVO", id_sucursal, id_usuario]
+  [tipo_venta ?? "CONTADO", metodo_pago ?? "EFECTIVO", id_sucursal, id_usuario, id_cliente]
 );
 
     const venta = rVenta.rows[0];
@@ -234,9 +393,13 @@ export const getVentaById = async (id_venta) => {
     `SELECT 
         v.*,
         u.username AS usuario_username,
-        u.nombre   AS usuario_nombre
+        u.nombre   AS usuario_nombre,
+        c.codigo   AS cliente_codigo,
+        c.nombre   AS cliente_nombre,
+        c.nit      AS cliente_nit
      FROM "Venta" v
      JOIN "Usuario" u ON u.id_usuario = v.id_usuario
+     LEFT JOIN "Clientes" c ON c."Id_clientes" = v.id_cliente
      WHERE v.id_venta = $1`,
     [id_venta]
   );
@@ -258,7 +421,7 @@ export const getDetallesByVenta = async (id_venta) => {
   return r.rows;
 };
 
-const ALLOWED_SORT = new Set(["id_venta", "fecha", "total", "utilidad_total", "estado", "id_usuario"]);
+const ALLOWED_SORT = new Set(["id_venta", "fecha", "total", "utilidad_total", "estado", "id_usuario", "id_cliente"]);
 
 export const listarVentas = async (filters) => {
   const {
@@ -329,9 +492,9 @@ export const listarVentas = async (filters) => {
     if (/^\d+$/.test(qq)) {
       where.push(`v.id_venta = $${i++}`);
       params.push(Number(qq));
-    } else {
-      where.push(`u.username ILIKE $${i++}`);
-      params.push(`%${qq}%`);
+      } else {
+      where.push(`(u.username ILIKE $${i++} OR COALESCE(c.nombre, '') ILIKE $${i++} OR COALESCE(c.codigo, '') ILIKE $${i++})`);
+      params.push(`%${qq}%`, `%${qq}%`, `%${qq}%`);
     }
   }
 
@@ -342,6 +505,7 @@ export const listarVentas = async (filters) => {
     `SELECT COUNT(*)::int AS total
      FROM "Venta" v
      JOIN "Usuario" u ON u.id_usuario = v.id_usuario
+     LEFT JOIN "Clientes" c ON c."Id_clientes" = v.id_cliente
      ${whereSql}`,
     params
   );
@@ -354,9 +518,13 @@ export const listarVentas = async (filters) => {
     `SELECT
         v.*,
         u.username AS usuario_username,
-        u.nombre   AS usuario_nombre
+        u.nombre   AS usuario_nombre,
+        c.codigo   AS cliente_codigo,
+        c.nombre   AS cliente_nombre,
+        c.nit      AS cliente_nit
      FROM "Venta" v
      JOIN "Usuario" u ON u.id_usuario = v.id_usuario
+     LEFT JOIN "Clientes" c ON c."Id_clientes" = v.id_cliente
      ${whereSql}
      ORDER BY v.${safeSortBy} ${safeSortDir}
      LIMIT $${i++} OFFSET $${i++}`,
@@ -383,9 +551,13 @@ export const getVentaCompleta = async (id_venta) => {
     `SELECT
         v.*,
         u.username AS usuario_username,
-        u.nombre   AS usuario_nombre
+        u.nombre   AS usuario_nombre,
+        c.codigo   AS cliente_codigo,
+        c.nombre   AS cliente_nombre,
+        c.nit      AS cliente_nit
      FROM "Venta" v
      JOIN "Usuario" u ON u.id_usuario = v.id_usuario
+     LEFT JOIN "Clientes" c ON c."Id_clientes" = v.id_cliente
      WHERE v.id_venta = $1`,
     [id_venta]
   );
@@ -407,6 +579,30 @@ export const getVentaCompleta = async (id_venta) => {
   );
 
   const detalles = rDet.rows;
+
+  const rAnulaciones = await pool.query(
+    `SELECT
+        a.id_anulacion,
+        a.id_venta,
+        a.id_detalle,
+        a.id_producto,
+        a.cantidad,
+        a.motivo,
+        (a.fecha AT TIME ZONE 'America/Guatemala') AS fecha,
+        a.id_usuario AS anulada_por,
+        u.username AS anulada_por_username,
+        u.nombre AS anulada_por_nombre,
+        p.nombre AS producto_nombre,
+        p.codigo_barras
+     FROM "Detalle_venta_anulacion" a
+     LEFT JOIN "Usuario" u ON u.id_usuario = a.id_usuario
+     LEFT JOIN "Producto" p ON p.id_producto = a.id_producto
+     WHERE a.id_venta = $1
+     ORDER BY a.fecha DESC, a.id_anulacion DESC`,
+    [id_venta]
+  );
+
+  const anulaciones = rAnulaciones.rows;
 
   // 3) Resumen calculado (para no depender de venta.total)
   const resumen = detalles.reduce(
@@ -452,6 +648,7 @@ export const getVentaCompleta = async (id_venta) => {
   return {
     venta: { ...venta, estado_real },
     detalles,
+    anulaciones,
     resumen,
   };
 };

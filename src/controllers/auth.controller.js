@@ -4,6 +4,14 @@ import * as Usuario from "../models/usuario.model.js";
 import { pool } from "../config/db.js";
 import * as Auth from "../models/auth.model.js";
 
+const getFechaInicioDefault = (fechaInicio) => {
+  if (fechaInicio) return fechaInicio;
+
+  const now = new Date();
+  const localDate = new Date(now.getTime() - now.getTimezoneOffset() * 60000);
+  return localDate.toISOString().slice(0, 10);
+};
+
 const signToken = (payload) => {
   return jwt.sign(payload, process.env.JWT_SECRET, {
     expiresIn: process.env.JWT_EXPIRES || "8h",
@@ -42,10 +50,15 @@ export const register = async (req, res) => {
     const password_hash = await bcrypt.hash(password, 10);
 
     const rUser = await client.query(
-      `INSERT INTO "Usuario" (username, password_hash, nombre, activo)
-       VALUES ($1,$2,$3,true)
+      `INSERT INTO "Usuario" (username, password_hash, nombre, activo, created_by, updated_by)
+       VALUES ($1,$2,$3,true,$4,$4)
        RETURNING id_usuario, username, nombre, activo`,
-      [username.trim(), password_hash, `${persona.nombre} ${persona.apellido}`.trim()]
+      [
+        username.trim(),
+        password_hash,
+        `${persona.nombre} ${persona.apellido}`.trim(),
+        req.user?.id_usuario ?? null,
+      ]
     );
 
     const id_usuario = rUser.rows[0].id_usuario;
@@ -53,19 +66,20 @@ export const register = async (req, res) => {
     // 3) Crear persona
     const rPersona = await client.query(
       `INSERT INTO "Persona"
-       (dpi_persona, nombre, apellido, fecha_nacimiento, fecha_inicio, direccion_persona, telefono, estado, id_usuario)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
+       (dpi_persona, nombre, apellido, fecha_nacimiento, fecha_inicio, direccion_persona, telefono, estado, id_usuario, created_by, updated_by)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$10)
        RETURNING *`,
       [
         persona.dpi_persona ?? null,
         persona.nombre.trim(),
         persona.apellido.trim(),
         persona.fecha_nacimiento ?? null,
-        persona.fecha_inicio ?? null,
+        getFechaInicioDefault(persona.fecha_inicio),
         persona.direccion_persona ?? null,
         persona.telefono ?? null,
         persona.estado ?? true,
-        id_usuario
+        id_usuario,
+        req.user?.id_usuario ?? null,
       ]
     );
 
@@ -75,10 +89,10 @@ export const register = async (req, res) => {
         if (!Number.isInteger(Number(id_rol))) continue;
 
         await client.query(
-          `INSERT INTO "Detalle_usuario" (id_usuario, id_rol)
-           VALUES ($1,$2)
+          `INSERT INTO "Detalle_usuario" (id_usuario, id_rol, activo, created_by, updated_by)
+           VALUES ($1,$2,true,$3,$3)
            ON CONFLICT DO NOTHING`,
-          [id_usuario, Number(id_rol)]
+          [id_usuario, Number(id_rol), req.user?.id_usuario ?? null]
         );
       }
     }

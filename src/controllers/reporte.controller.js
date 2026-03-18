@@ -1,5 +1,21 @@
 import * as R from "../models/reporte.model.js";
 
+export const auditoriaCatalogo = async (req, res) => {
+  try {
+    const data = await R.auditoriaCatalogo({
+      entidad: req.query.entidad,
+      estado: req.query.estado,
+      q: req.query.q,
+      page: req.query.page,
+      limit: req.query.limit,
+    });
+
+    res.json({ ok: true, ...data });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+};
+
 export const corteVentas = async (req, res) => {
   try {
     const { desde, hasta, id_sucursal, id_usuario } = req.query;

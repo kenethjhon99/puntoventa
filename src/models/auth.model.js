@@ -17,6 +17,7 @@ export const getRolesByUsuario = async (id_usuario) => {
      FROM "Detalle_usuario" du
      JOIN "Rol" r ON r.id_rol = du.id_rol
      WHERE du.id_usuario = $1
+       AND COALESCE(du.activo, true) = true
      ORDER BY r.nombre_rol`,
     [id_usuario]
   );

@@ -1,4 +1,5 @@
 import * as Venta from "../models/venta.model.js";
+import { getCajaSesionActiva } from "../models/caja.model.js";
 import { addLocalDates } from "../utils/datetime.js";
 
 export const anularDetalleVenta = async (req, res) => {
@@ -27,17 +28,51 @@ export const anularDetalleVenta = async (req, res) => {
   }
 };
 
+export const anularVentaCompleta = async (req, res) => {
+  try {
+    const { id_venta } = req.params;
+    const motivo = String(req.body?.motivo || "").trim();
+
+    if (!/^\d+$/.test(id_venta)) {
+      return res.status(400).json({ error: "ID invalido" });
+    }
+
+    if (!motivo) {
+      return res.status(400).json({ error: "motivo es requerido" });
+    }
+
+    const venta = await Venta.anularVentaCompleta({
+      id_venta: Number(id_venta),
+      motivo,
+      id_usuario: req.user.id_usuario,
+      id_bodega: 1,
+    });
+
+    res.json({ ok: true, venta });
+  } catch (error) {
+    res.status(400).json({ error: error.message });
+  }
+};
+
 export const crearVenta = async (req, res) => {
   try {
-    const { items, tipo_venta, metodo_pago, id_sucursal } = req.body;
+    const { items, tipo_venta, metodo_pago, id_sucursal, id_cliente } = req.body;
 
     if (!Array.isArray(items) || items.length === 0) {
       return res.status(400).json({ error: "items es requerido" });
     }
 
+    const sesionCaja = await getCajaSesionActiva(req.user.id_usuario);
+    if (!sesionCaja) {
+      return res.status(400).json({
+        error: "Debes abrir una caja antes de registrar ventas",
+      });
+    }
+
     const venta = await Venta.crearVenta({
       id_usuario: req.user.id_usuario,
       id_sucursal: Number(id_sucursal || 1),
+      id_cliente: id_cliente ? Number(id_cliente) : null,
       tipo_venta,
       metodo_pago,
       items,

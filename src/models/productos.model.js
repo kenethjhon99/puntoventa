@@ -12,6 +12,7 @@ export const getProductos = async () => {
     LEFT JOIN "Stock_producto" s
       ON s.id_producto = p.id_producto
      AND s.id_bodega = 1
+    WHERE COALESCE(p.activo, true) = true
     ORDER BY p.nombre ASC
   `);
 
@@ -47,6 +48,7 @@ export const createProductoConStock = async ({
   stock_minimo = 0,
   ubicacion = null,
   id_bodega = 1,
+  id_usuario = null,
 }) => {
   const client = await pool.connect();
 
@@ -55,16 +57,16 @@ export const createProductoConStock = async ({
 
     // 1) Insert Producto
     const prod = await client.query(
-      'INSERT INTO "Producto" (codigo_barras, nombre, descripcion, precio_compra, precio_venta) VALUES ($1,$2,$3,$4,$5) RETURNING "id_producto"',
-      [codigo_barras, nombre, descripcion, precio_compra, precio_venta]
+      'INSERT INTO "Producto" (codigo_barras, nombre, descripcion, precio_compra, precio_venta, activo, created_by, updated_by) VALUES ($1,$2,$3,$4,$5,true,$6,$6) RETURNING "id_producto"',
+      [codigo_barras, nombre, descripcion, precio_compra, precio_venta, id_usuario]
     );
 
     const id_producto = prod.rows[0].id_producto;
 
     // 2) Insert Stock_producto (para bodega 1)
     await client.query(
-      'INSERT INTO "Stock_producto" ("existencia","stock_minimo","ubicacion","id_producto","id_bodega") VALUES ($1,$2,$3,$4,$5)',
-      [existencia_inicial, stock_minimo, ubicacion, id_producto, id_bodega]
+      'INSERT INTO "Stock_producto" ("existencia","stock_minimo","ubicacion","id_producto","id_bodega","created_by","updated_by") VALUES ($1,$2,$3,$4,$5,$6,$6)',
+      [existencia_inicial, stock_minimo, ubicacion, id_producto, id_bodega, id_usuario]
     );
 
     await client.query("COMMIT");
@@ -87,14 +89,16 @@ export const createProductoConStock = async ({
   }
 };
 
-export const updateProducto = async (id, data) => {
+export const updateProducto = async (id, data, actorId = null) => {
   const fields = [];
   const values = [];
   let index = 1;
 
-  for (const key in data) {
+  const nextData = { ...data, updated_by: actorId };
+
+  for (const key in nextData) {
     fields.push(`${key} = $${index}`);
-    values.push(data[key]);
+    values.push(nextData[key]);
     index++;
   }
 
@@ -131,7 +135,17 @@ export const existsCodigoBarras = async (codigo_barras, excludeId = null) => {
   return r.rowCount > 0;
 };
 
-export const deleteProducto = async (id) => {
-  const result = await pool.query("DELETE FROM \"Producto\" WHERE id_producto = $1 RETURNING *", [id]);
+export const deleteProducto = async (id, actorId = null) => {
+  const result = await pool.query(
+    `UPDATE "Producto"
+     SET activo = false,
+         inactivado_en = now(),
+         inactivado_por = $2,
+         updated_by = $2
+     WHERE id_producto = $1
+       AND COALESCE(activo, true) = true
+     RETURNING *`,
+    [id, actorId]
+  );
   return result.rows[0];
 };

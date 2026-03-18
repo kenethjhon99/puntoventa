@@ -14,6 +14,8 @@ const round2 = (n) => Number((Number(n) || 0).toFixed(2));
 export const crearCompra = async ({
   tipo_documento,
   no_documento,
+  fecha_compra,
+  observaciones,
   id_usuario,
   id_proveedor,
   id_sucursal = 1,
@@ -27,42 +29,46 @@ export const crearCompra = async ({
 
     // 1) Crear Compra
     const rCompra = await client.query(
-  `INSERT INTO "Compra"(
-  fecha,
-  tipo_documento,
-  no_documento,
-  subtotal,
-  descuento,
-  total,
-  estado,
-  id_proveedor,
-  id_sucursal,
-  id_bodega,
-  id_usuario
-)
-VALUES (
-  now(),
-  $1,
-  $2,
-  0,
-  0,
-  0,
-  'COMPLETADA',
-  $3,
-  $4,
-  $5,
-  $6
-)
-RETURNING *`,
-  [
-  tipo_documento,
-  no_documento,
-  id_proveedor,
-  id_sucursal,
-  id_bodega,
-  id_usuario
-  ]
-);
+      `INSERT INTO "Compra"(
+        fecha,
+        tipo_documento,
+        no_documento,
+        subtotal,
+        descuento,
+        total,
+        estado,
+        observaciones,
+        id_proveedor,
+        id_sucursal,
+        id_bodega,
+        id_usuario
+      )
+      VALUES (
+        COALESCE($1::timestamptz, now()),
+        $2,
+        $3,
+        0,
+        0,
+        0,
+        'COMPLETADA',
+        $4,
+        $5,
+        $6,
+        $7,
+        $8
+      )
+      RETURNING *`,
+      [
+        fecha_compra ?? null,
+        tipo_documento ?? "FACTURA",
+        no_documento ?? null,
+        observaciones ?? null,
+        id_proveedor,
+        id_sucursal,
+        id_bodega,
+        id_usuario
+      ]
+    );
 
     const compra = rCompra.rows[0];
     let total = 0;
@@ -140,9 +146,14 @@ RETURNING *`,
     }
 
     // 3) actualizar total compra
+    const totalFinal = round2(total);
     const rFinal = await client.query(
-      `UPDATE "Compra" SET total = $1 WHERE id_compra = $2 RETURNING *`,
-      [round2(total), compra.id_compra]
+      `UPDATE "Compra"
+       SET subtotal = $1,
+           total = $1
+       WHERE id_compra = $2
+       RETURNING *`,
+      [totalFinal, compra.id_compra]
     );
 
     await client.query("COMMIT");
@@ -163,6 +174,8 @@ export const listarCompras = async (filters) => {
     desde,
     hasta,
     estado,
+    no_documento,
+    proveedor,
     id_usuario,
     id_proveedor,
     id_sucursal,
@@ -182,11 +195,39 @@ export const listarCompras = async (filters) => {
   const where = [];
   const params = [];
   let i = 1;
+  const estadoNormalizado = String(estado || "").trim().toUpperCase();
 
   if (desde) { where.push(`c.fecha >= $${i++}::timestamptz`); params.push(desde); }
   if (hasta) { where.push(`c.fecha < ($${i++}::date + interval '1 day')`); params.push(hasta); }
+  if (no_documento) {
+    where.push(`COALESCE(c.no_documento, '') ILIKE $${i++}`);
+    params.push(`%${String(no_documento).trim()}%`);
+  }
+  if (proveedor) {
+    where.push(`COALESCE(p.nombre, '') ILIKE $${i++}`);
+    params.push(`%${String(proveedor).trim()}%`);
+  }
 
-  if (estado) { where.push(`c.estado = $${i++}`); params.push(String(estado).toUpperCase()); }
+  if (estadoNormalizado === "PARCIAL") {
+    where.push(`UPPER(COALESCE(c.estado, '')) <> 'ANULADA'`);
+    where.push(`EXISTS (
+      SELECT 1
+      FROM "Detalle_compra" d_estado
+      WHERE d_estado.id_compra = c.id_compra
+        AND COALESCE(d_estado.cantidad_anulada, 0) > 0
+    )`);
+  } else if (estadoNormalizado === "COMPLETADA") {
+    where.push(`UPPER(COALESCE(c.estado, '')) = 'COMPLETADA'`);
+    where.push(`NOT EXISTS (
+      SELECT 1
+      FROM "Detalle_compra" d_estado
+      WHERE d_estado.id_compra = c.id_compra
+        AND COALESCE(d_estado.cantidad_anulada, 0) > 0
+    )`);
+  } else if (estadoNormalizado) {
+    where.push(`c.estado = $${i++}`);
+    params.push(estadoNormalizado);
+  }
   if (id_usuario) { where.push(`c.id_usuario = $${i++}`); params.push(Number(id_usuario)); }
   if (id_proveedor) { where.push(`c.id_proveedor = $${i++}`); params.push(Number(id_proveedor)); }
   if (id_sucursal) { where.push(`c.id_sucursal = $${i++}`); params.push(Number(id_sucursal)); }
@@ -196,6 +237,7 @@ export const listarCompras = async (filters) => {
   const rCount = await pool.query(
     `SELECT COUNT(*)::int AS total
      FROM "Compra" c
+     JOIN "Proveedor" p ON p.id_proveedor = c.id_proveedor
      ${whereSql}`,
     params
   );
@@ -207,10 +249,24 @@ export const listarCompras = async (filters) => {
     `SELECT
         c.*,
         p.nombre AS proveedor_nombre,
-        u.username AS usuario_username
+        u.username AS usuario_username,
+        COALESCE(ds.unidades_anuladas, 0) AS unidades_anuladas,
+        COALESCE(ds.detalles_anulados, 0) AS detalles_anulados,
+        CASE
+          WHEN UPPER(COALESCE(c.estado, '')) = 'ANULADA' THEN 'ANULADA'
+          WHEN COALESCE(ds.unidades_anuladas, 0) > 0 THEN 'PARCIAL'
+          ELSE c.estado
+        END AS estado_visual
      FROM "Compra" c
      JOIN "Proveedor" p ON p.id_proveedor = c.id_proveedor
      JOIN "Usuario" u ON u.id_usuario = c.id_usuario
+     LEFT JOIN LATERAL (
+       SELECT
+         COALESCE(SUM(d.cantidad_anulada), 0) AS unidades_anuladas,
+         COUNT(*) FILTER (WHERE COALESCE(d.cantidad_anulada, 0) > 0) AS detalles_anulados
+       FROM "Detalle_compra" d
+       WHERE d.id_compra = c.id_compra
+     ) ds ON true
      ${whereSql}
      ORDER BY c.${safeSortBy} ${safeSortDir}
      LIMIT $${i++} OFFSET $${i++}`,
@@ -253,6 +309,19 @@ export const getCompraCompleta = async (id_compra) => {
   );
   const detalles = rD.rows;
 
+  const rA = await pool.query(
+    `SELECT
+        a.*,
+        u.username AS anulada_por_username,
+        u.nombre AS anulada_por_nombre
+     FROM "Detalle_compra_anulacion" a
+     LEFT JOIN "Usuario" u ON u.id_usuario = a.id_usuario
+     WHERE a.id_compra = $1
+     ORDER BY a.fecha DESC, a.id_anulacion DESC`,
+    [id_compra]
+  );
+  const anulaciones = rA.rows;
+
   const resumen = detalles.reduce(
     (acc, d) => {
       const cant = Number(d.cantidad) || 0;
@@ -278,7 +347,7 @@ export const getCompraCompleta = async (id_compra) => {
   const todoAnulado = resumen.items_actual === 0;
   const estado_real = todoAnulado ? "ANULADA" : compra.estado;
 
-  return { compra: { ...compra, estado_real }, detalles, resumen };
+  return { compra: { ...compra, estado_real }, detalles, anulaciones, resumen };
 };
 
 // ===== Anulación parcial de un detalle compra (revierte stock con SALIDA) =====
@@ -347,6 +416,13 @@ export const anularDetalleCompra = async ({ id_compra, id_detalle, cantidad, mot
       [nueva_anulada, nuevo_estado, id_usuario, motivo ?? null, id_detalle]
     );
 
+    await client.query(
+      `INSERT INTO "Detalle_compra_anulacion"
+       (id_compra, id_detalle_compra, id_producto, cantidad, motivo, id_usuario)
+       VALUES ($1, $2, $3, $4, $5, $6)`,
+      [id_compra, id_detalle, det.id_producto, cantidad, motivo ?? null, id_usuario]
+    );
+
     // Recalcular total compra
     const rTotal = await client.query(
       `SELECT COALESCE(SUM((cantidad - cantidad_anulada) * precio_compra),0) AS total
@@ -367,7 +443,8 @@ export const anularDetalleCompra = async ({ id_compra, id_detalle, cantidad, mot
 
     await client.query(
       `UPDATE "Compra"
-       SET total = $1,
+       SET subtotal = $1,
+           total = $1,
            estado = CASE WHEN $2 THEN 'ANULADA' ELSE estado END,
            anulada_en = CASE WHEN $2 THEN now() ELSE anulada_en END,
            anulada_por = CASE WHEN $2 THEN $3 ELSE anulada_por END,
@@ -454,12 +531,20 @@ export const anularCompra = async ({ id_compra, motivo, id_usuario, id_bodega = 
          WHERE id_detalle_compra = $3`,
         [id_usuario, motivo ?? null, d.id_detalle_compra]
       );
+
+      await client.query(
+        `INSERT INTO "Detalle_compra_anulacion"
+         (id_compra, id_detalle_compra, id_producto, cantidad, motivo, id_usuario)
+         VALUES ($1, $2, $3, $4, $5, $6)`,
+        [id_compra, d.id_detalle_compra, d.id_producto, pendiente, motivo ?? null, id_usuario]
+      );
     }
 
     // total a 0 y compra ANULADA
     await client.query(
       `UPDATE "Compra"
-       SET total = 0,
+       SET subtotal = 0,
+           total = 0,
            estado = 'ANULADA',
            anulada_en = now(),
            anulada_por = $1,

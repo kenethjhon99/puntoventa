@@ -33,7 +33,8 @@ export const crearProducto = async (req, res) => {
       existencia_inicial: Number(existencia_inicial || 0),
       stock_minimo: Number(stock_minimo || 0),
       ubicacion: ubicacion ?? null,
-      id_bodega: 1
+      id_bodega: 1,
+      id_usuario: req.user?.id_usuario ?? null,
     });
 
     res.status(201).json(creado);
@@ -97,7 +98,11 @@ export const actualizarProducto = async (req, res) => {
     let actualizado = null;
 
     if (Object.keys(v.data).length > 0) {
-      actualizado = await Producto.updateProducto(id, v.data);
+      actualizado = await Producto.updateProducto(
+        id,
+        v.data,
+        req.user?.id_usuario ?? null
+      );
 
       if (!actualizado) {
         return res.status(404).json({ error: "Producto no encontrado" });
@@ -143,7 +148,10 @@ export const actualizarProducto = async (req, res) => {
 export const eliminarProducto = async (req, res) => {
   try {
     const { id } = req.params;
-    const eliminado = await Producto.deleteProducto(id);
+    const eliminado = await Producto.deleteProducto(
+      id,
+      req.user?.id_usuario ?? null
+    );
     if (!eliminado) {
       return res.status(404).json({ error: "Producto no encontrado" });
     }

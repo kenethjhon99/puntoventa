@@ -3,26 +3,30 @@ import * as Compra from "../models/compra.model.js";
 export const crearCompra = async (req, res) => {
   try {
     const {
-  tipo_documento,
-  no_documento,
-  id_proveedor,
-  id_sucursal,
-  id_bodega,
-  items
-} = req.body;
+      tipo_documento,
+      no_documento,
+      id_proveedor,
+      id_sucursal,
+      id_bodega,
+      fecha_compra,
+      observaciones,
+      items
+    } = req.body;
 
     if (!id_proveedor) return res.status(400).json({ error: "id_proveedor es requerido" });
     if (!Array.isArray(items) || items.length === 0) return res.status(400).json({ error: "items es requerido" });
 
     const compra = await Compra.crearCompra({
-  tipo_documento,
-  no_documento,
-  id_usuario: req.user.id_usuario,
-  id_proveedor: Number(id_proveedor),
-  id_sucursal: Number(id_sucursal || 1),
-  id_bodega: Number(id_bodega || 1),
-  items
-});
+      tipo_documento,
+      no_documento,
+      fecha_compra,
+      observaciones,
+      id_usuario: req.user.id_usuario,
+      id_proveedor: Number(id_proveedor),
+      id_sucursal: Number(id_sucursal || 1),
+      id_bodega: Number(id_bodega || 1),
+      items
+    });
 
     res.status(201).json({ ok: true, compra });
   } catch (e) {
@@ -36,6 +40,8 @@ export const listarCompras = async (req, res) => {
       desde: req.query.desde,
       hasta: req.query.hasta,
       estado: req.query.estado,
+      no_documento: req.query.no_documento,
+      proveedor: req.query.proveedor,
       id_usuario: req.query.id_usuario,
       id_proveedor: req.query.id_proveedor,
       id_sucursal: req.query.id_sucursal,

@@ -1,5 +1,234 @@
 import { pool } from "../config/db.js";
 
+const AUDIT_ENTITIES = {
+  PRODUCTOS: {
+    table: "Producto",
+    alias: "p",
+    idColumn: "id_producto",
+    codeExpr: `COALESCE(p.codigo_barras, '')`,
+    nameExpr: `COALESCE(p.nombre, 'Sin nombre')`,
+    detailExpr: `COALESCE(p.descripcion, '')`,
+    activeExpr: `COALESCE(p.activo, true)`,
+    fromSql: `"Producto" p`,
+    createdAtExpr: "p.created_at",
+    updatedAtExpr: "p.updated_at",
+    inactivatedAtExpr: "p.inactivado_en",
+    createdByExpr: "p.created_by",
+    updatedByExpr: "p.updated_by",
+    inactivatedByExpr: "p.inactivado_por",
+    referenceExpr: "NULL::text",
+    quantityExpr: "NULL::integer",
+    reasonExpr: "NULL::text",
+  },
+  PROVEEDORES: {
+    table: "Proveedor",
+    alias: "p",
+    idColumn: "id_proveedor",
+    codeExpr: `COALESCE(p.nit, '')`,
+    nameExpr: `COALESCE(p.nombre, 'Sin nombre')`,
+    detailExpr: `COALESCE(p.correo, '')`,
+    activeExpr: `COALESCE(p.estado, true)`,
+    fromSql: `"Proveedor" p`,
+    createdAtExpr: "p.created_at",
+    updatedAtExpr: "p.updated_at",
+    inactivatedAtExpr: "p.inactivado_en",
+    createdByExpr: "p.created_by",
+    updatedByExpr: "p.updated_by",
+    inactivatedByExpr: "p.inactivado_por",
+    referenceExpr: "NULL::text",
+    quantityExpr: "NULL::integer",
+    reasonExpr: "NULL::text",
+  },
+  CLIENTES: {
+    table: "Clientes",
+    alias: "p",
+    idColumn: `"Id_clientes"`,
+    codeExpr: `COALESCE(p.codigo, '')`,
+    nameExpr: `COALESCE(p.nombre, 'Sin nombre')`,
+    detailExpr: `COALESCE(p.nit, '')`,
+    activeExpr: `COALESCE(p.estado, true)`,
+    fromSql: `"Clientes" p`,
+    createdAtExpr: "p.created_at",
+    updatedAtExpr: "p.updated_at",
+    inactivatedAtExpr: "p.inactivado_en",
+    createdByExpr: "p.created_by",
+    updatedByExpr: "p.updated_by",
+    inactivatedByExpr: "p.inactivado_por",
+    referenceExpr: "NULL::text",
+    quantityExpr: "NULL::integer",
+    reasonExpr: "NULL::text",
+  },
+  USUARIOS: {
+    table: "Usuario",
+    alias: "p",
+    idColumn: "id_usuario",
+    codeExpr: `COALESCE(p.username, '')`,
+    nameExpr: `COALESCE(p.nombre, 'Sin nombre')`,
+    detailExpr: `COALESCE(per.nombre || ' ' || per.apellido, '')`,
+    activeExpr: `COALESCE(p.activo, true)`,
+    fromSql: `"Usuario" p LEFT JOIN "Persona" per ON per.id_usuario = p.id_usuario`,
+    createdAtExpr: "p.created_at",
+    updatedAtExpr: "p.updated_at",
+    inactivatedAtExpr: "p.inactivado_en",
+    createdByExpr: "p.created_by",
+    updatedByExpr: "p.updated_by",
+    inactivatedByExpr: "p.inactivado_por",
+    referenceExpr: "NULL::text",
+    quantityExpr: "NULL::integer",
+    reasonExpr: "NULL::text",
+  },
+  ROLES_USUARIO: {
+    table: "Detalle_usuario",
+    alias: "du",
+    idColumn: "id_usuario",
+    codeExpr: `COALESCE(u.username, '')`,
+    nameExpr: `COALESCE(r.nombre_rol, 'Sin rol')`,
+    detailExpr: `COALESCE(u.nombre, '')`,
+    activeExpr: `COALESCE(du.activo, true)`,
+    fromSql: `"Detalle_usuario" du JOIN "Usuario" u ON u.id_usuario = du.id_usuario JOIN "Rol" r ON r.id_rol = du.id_rol`,
+    createdAtExpr: "du.created_at",
+    updatedAtExpr: "du.updated_at",
+    inactivatedAtExpr: "du.inactivado_en",
+    createdByExpr: "du.created_by",
+    updatedByExpr: "du.updated_by",
+    inactivatedByExpr: "du.inactivado_por",
+    referenceExpr: "NULL::text",
+    quantityExpr: "NULL::integer",
+    reasonExpr: "NULL::text",
+  },
+  VENTA_ANULACIONES: {
+    table: "Detalle_venta_anulacion",
+    alias: "a",
+    idColumn: "id_anulacion",
+    codeExpr: `CONCAT('Venta #', a.id_venta)`,
+    nameExpr: `COALESCE(p.nombre, 'Producto sin nombre')`,
+    detailExpr: `CONCAT('Detalle #', a.id_detalle, ' | Cantidad: ', a.cantidad, ' | Motivo: ', COALESCE(a.motivo, 'Sin motivo'))`,
+    activeExpr: `true`,
+    fromSql: `"Detalle_venta_anulacion" a LEFT JOIN "Producto" p ON p.id_producto = a.id_producto`,
+    createdAtExpr: "a.created_at",
+    updatedAtExpr: "a.updated_at",
+    inactivatedAtExpr: "NULL::timestamp with time zone",
+    createdByExpr: "a.created_by",
+    updatedByExpr: "a.updated_by",
+    inactivatedByExpr: "NULL::integer",
+    referenceExpr: `CONCAT('Venta #', a.id_venta, ' | Detalle #', a.id_detalle)`,
+    quantityExpr: "a.cantidad",
+    reasonExpr: "COALESCE(a.motivo, 'Sin motivo')",
+  },
+  COMPRA_ANULACIONES: {
+    table: "Detalle_compra_anulacion",
+    alias: "a",
+    idColumn: "id_anulacion",
+    codeExpr: `CONCAT('Compra #', a.id_compra)`,
+    nameExpr: `COALESCE(p.nombre, 'Producto sin nombre')`,
+    detailExpr: `CONCAT('Detalle #', a.id_detalle_compra, ' | Cantidad: ', a.cantidad, ' | Motivo: ', COALESCE(a.motivo, 'Sin motivo'))`,
+    activeExpr: `true`,
+    fromSql: `"Detalle_compra_anulacion" a LEFT JOIN "Producto" p ON p.id_producto = a.id_producto`,
+    createdAtExpr: "a.created_at",
+    updatedAtExpr: "a.updated_at",
+    inactivatedAtExpr: "NULL::timestamp with time zone",
+    createdByExpr: "a.created_by",
+    updatedByExpr: "a.updated_by",
+    inactivatedByExpr: "NULL::integer",
+    referenceExpr: `CONCAT('Compra #', a.id_compra, ' | Detalle #', a.id_detalle_compra)`,
+    quantityExpr: "a.cantidad",
+    reasonExpr: "COALESCE(a.motivo, 'Sin motivo')",
+  },
+};
+
+export const auditoriaCatalogo = async ({
+  entidad = "PRODUCTOS",
+  estado = "TODOS",
+  q = "",
+  page = 1,
+  limit = 20,
+}) => {
+  const entidadKey = String(entidad || "PRODUCTOS").trim().toUpperCase();
+  const config = AUDIT_ENTITIES[entidadKey] || AUDIT_ENTITIES.PRODUCTOS;
+  const safePage = Math.max(1, Number(page) || 1);
+  const safeLimit = Math.min(1000, Math.max(1, Number(limit) || 20));
+  const offset = (safePage - 1) * safeLimit;
+
+  const alias = config.alias;
+  const where = [];
+  const params = [];
+  let i = 1;
+
+  const estadoNormalizado = String(estado || "TODOS").trim().toUpperCase();
+  if (estadoNormalizado === "ACTIVOS") {
+    where.push(`${config.activeExpr} = true`);
+  } else if (estadoNormalizado === "INACTIVOS") {
+    where.push(`${config.activeExpr} = false`);
+  }
+
+  const qNormalizado = String(q || "").trim();
+  if (qNormalizado) {
+    where.push(`(${config.codeExpr} ILIKE $${i} OR ${config.nameExpr} ILIKE $${i} OR ${config.detailExpr} ILIKE $${i})`);
+    params.push(`%${qNormalizado}%`);
+    i++;
+  }
+
+  const whereSql = where.length ? `WHERE ${where.join(" AND ")}` : "";
+
+  const baseSql = `
+    FROM ${config.fromSql}
+    LEFT JOIN "Usuario" uc ON uc.id_usuario = ${config.createdByExpr}
+    LEFT JOIN "Usuario" uu ON uu.id_usuario = ${config.updatedByExpr}
+    LEFT JOIN "Usuario" ui ON ui.id_usuario = ${config.inactivatedByExpr}
+    ${whereSql}
+  `;
+
+  const rCount = await pool.query(
+    `SELECT COUNT(*)::int AS total ${baseSql}`,
+    params
+  );
+
+  const rData = await pool.query(
+    `SELECT
+        '${entidadKey}' AS entidad,
+        ${alias}.${config.idColumn} AS registro_id,
+        ${config.codeExpr} AS codigo,
+        ${config.nameExpr} AS nombre,
+        ${config.detailExpr} AS detalle,
+        ${config.referenceExpr} AS referencia,
+        ${config.quantityExpr} AS cantidad_evento,
+        ${config.reasonExpr} AS motivo_evento,
+        ${config.activeExpr} AS activo,
+        ${config.createdAtExpr} AS created_at,
+        ${config.updatedAtExpr} AS updated_at,
+        ${config.inactivatedAtExpr} AS inactivado_en,
+        ${config.createdByExpr} AS created_by,
+        ${config.updatedByExpr} AS updated_by,
+        ${config.inactivatedByExpr} AS inactivado_por,
+        uc.username AS created_by_username,
+        uc.nombre AS created_by_nombre,
+        uu.username AS updated_by_username,
+        uu.nombre AS updated_by_nombre,
+        ui.username AS inactivado_por_username,
+        ui.nombre AS inactivado_por_nombre
+      ${baseSql}
+      ORDER BY ${config.updatedAtExpr} DESC NULLS LAST, ${config.createdAtExpr} DESC NULLS LAST
+      LIMIT $${i++} OFFSET $${i++}`,
+    [...params, safeLimit, offset]
+  );
+
+  const totalRows = rCount.rows[0]?.total ?? 0;
+  const totalPages = Math.ceil(totalRows / safeLimit);
+
+  return {
+    data: rData.rows,
+    meta: {
+      entidad: entidadKey,
+      page: safePage,
+      limit: safeLimit,
+      totalRows,
+      totalPages,
+      estado: estadoNormalizado,
+      q: qNormalizado,
+    },
+  };
+};
+
 export const corteVentas = async ({ desde, hasta, id_sucursal = 1, id_usuario = null }) => {
   const params = [desde, hasta, Number(id_sucursal)];
   let i = 4;

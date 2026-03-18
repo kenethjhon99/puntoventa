@@ -1,9 +1,11 @@
 import { Router } from "express";
 import { register, login } from "../controllers/auth.controller.js";
+import { auth } from "../middlewares/auth.js";
+import { requireRole } from "../middlewares/requireRole.js";
 
 const router = Router();
 
-router.post("/register", register);
+router.post("/register", auth, requireRole("SUPER_ADMIN"), register);
 router.post("/login", login);
 
 export default router;

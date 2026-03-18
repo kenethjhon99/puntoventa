@@ -1,5 +1,6 @@
 import { Router } from "express";
 import {
+  crearUsuario,
   listarUsuarios,
   editarUsuario,
   desactivarUsuario,
@@ -13,17 +14,18 @@ import { requireRole } from "../middlewares/requireRole.js";
 
 const router = Router();
 
-// (Por ahora solo protegido con auth. Luego metemos role=ADMIN)
-router.get("/", auth, requireRole("ADMIN"), listarUsuarios);
-router.post("/:id", auth, requireRole("ADMIN"), editarUsuario);
+router.get("/", auth, requireRole("SUPER_ADMIN"), listarUsuarios);
+router.post("/", auth, requireRole("SUPER_ADMIN"), crearUsuario);
+router.post("/:id", auth, requireRole("SUPER_ADMIN"), editarUsuario);
 
 // soft delete
-router.post("/:id/desactivar", auth, requireRole("ADMIN"), desactivarUsuario);
-router.post("/:id/activar", auth, requireRole("ADMIN"), activarUsuario);
+router.post("/:id/desactivar", auth, requireRole("SUPER_ADMIN"), desactivarUsuario);
+router.post("/:id/activar", auth, requireRole("SUPER_ADMIN"), activarUsuario);
 
 // roles
-router.post("/:id/roles", auth, requireRole("ADMIN"), asignarRol);
-router.delete("/:id/roles/:id_rol", auth, requireRole("ADMIN"), quitarRol);
+router.post("/:id/roles", auth, requireRole("SUPER_ADMIN"), asignarRol);
+router.patch("/:id/roles/:id_rol/desactivar", auth, requireRole("SUPER_ADMIN"), quitarRol);
+router.delete("/:id/roles/:id_rol", auth, requireRole("SUPER_ADMIN"), quitarRol);
 
 
 
