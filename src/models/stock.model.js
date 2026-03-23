@@ -1,22 +1,63 @@
 import { pool } from "../config/db.js";
 
-export const getStock = async () => {
-  const result = await pool.query(`
-    SELECT 
+export const getStock = async ({
+  id_bodega = 1,
+  q = "",
+  solo_bajo_minimo = false,
+} = {}) => {
+  const values = [id_bodega];
+  const where = [`s.id_bodega = $1`, `COALESCE(p.activo, true) = true`];
+  let index = 2;
+
+  if (q) {
+    where.push(`(
+      p.nombre ILIKE $${index}
+      OR COALESCE(p.descripcion, '') ILIKE $${index}
+      OR COALESCE(p.codigo_barras, '') ILIKE $${index}
+    )`);
+    values.push(`%${q}%`);
+    index++;
+  }
+
+  if (solo_bajo_minimo) {
+    where.push(`
+      COALESCE(s.stock_minimo, 0) > 0
+      AND COALESCE(s.existencia, 0) <= COALESCE(s.stock_minimo, 0)
+    `);
+  }
+
+  const result = await pool.query(
+    `
+    SELECT
       p.id_producto,
       p.codigo_barras,
       p.nombre,
+      p.descripcion,
+      p.precio_compra,
       p.precio_venta,
       s.id_stock,
       s.existencia,
       s.stock_minimo,
       s.ubicacion,
-      s.id_bodega
+      s.id_bodega,
+      GREATEST(COALESCE(s.stock_minimo, 0) - COALESCE(s.existencia, 0), 0) AS faltante,
+      (
+        COALESCE(s.stock_minimo, 0) > 0
+        AND COALESCE(s.existencia, 0) <= COALESCE(s.stock_minimo, 0)
+      ) AS bajo_minimo
     FROM "Producto" p
-    JOIN "Stock_producto" s 
+    JOIN "Stock_producto" s
       ON s."id_producto" = p."id_producto"
-    ORDER BY p."nombre" ASC
-  `);
+    WHERE ${where.join(" AND ")}
+    ORDER BY
+      (
+        COALESCE(s.stock_minimo, 0) > 0
+        AND COALESCE(s.existencia, 0) <= COALESCE(s.stock_minimo, 0)
+      ) DESC,
+      p."nombre" ASC
+  `,
+    values
+  );
 
   return result.rows;
 };
@@ -121,23 +162,75 @@ export const crearMovimientoStock = async ({
   }
 };
 
-export const getMovimientosStock = async ({ id_producto = null, id_bodega = 1, limit = 50 } = {}) => {
-  const values = [];
-  let where = `WHERE ms.id_bodega = $1`;
-  values.push(id_bodega);
+export const getMovimientosStock = async ({
+  id_producto = null,
+  id_bodega = 1,
+  tipo = null,
+  desde = null,
+  hasta = null,
+  q = "",
+  limit = 100,
+} = {}) => {
+  const values = [id_bodega];
+  const where = [`ms.id_bodega = $1`];
+  let index = 2;
 
   if (id_producto) {
-    where += ` AND ms.id_producto = $2`;
+    where.push(`ms.id_producto = $${index}`);
     values.push(id_producto);
+    index++;
   }
+
+  if (tipo && ["ENTRADA", "SALIDA", "AJUSTE"].includes(String(tipo).toUpperCase())) {
+    where.push(`ms.tipo = $${index}`);
+    values.push(String(tipo).toUpperCase());
+    index++;
+  }
+
+  if (desde) {
+    where.push(`ms.fecha::date >= $${index}::date`);
+    values.push(desde);
+    index++;
+  }
+
+  if (hasta) {
+    where.push(`ms.fecha::date <= $${index}::date`);
+    values.push(hasta);
+    index++;
+  }
+
+  if (q) {
+    where.push(`(
+      COALESCE(p.nombre, '') ILIKE $${index}
+      OR COALESCE(p.codigo_barras, '') ILIKE $${index}
+      OR COALESCE(ms.motivo, '') ILIKE $${index}
+      OR COALESCE(u.username, '') ILIKE $${index}
+      OR COALESCE(u.nombre, '') ILIKE $${index}
+    )`);
+    values.push(`%${q}%`);
+    index++;
+  }
+
+  const normalizedLimit = Math.max(1, Math.min(Number(limit) || 100, 500));
+  values.push(normalizedLimit);
 
   const r = await pool.query(
     `
-    SELECT ms.*
+    SELECT
+      ms.*,
+      p.nombre AS producto_nombre,
+      p.codigo_barras AS producto_codigo_barras,
+      p.descripcion AS producto_descripcion,
+      COALESCE(u.nombre, u.username, 'Sistema') AS usuario_nombre,
+      u.username AS usuario_username
     FROM "Movimiento_stock" ms
-    ${where}
-    ORDER BY ms.fecha DESC
-    LIMIT ${Number(limit) || 50}
+    LEFT JOIN "Producto" p
+      ON p.id_producto = ms.id_producto
+    LEFT JOIN "Usuario" u
+      ON u.id_usuario = ms.id_usuario
+    WHERE ${where.join(" AND ")}
+    ORDER BY ms.fecha DESC, ms.updated_at DESC, ms.id_producto ASC
+    LIMIT $${index}
     `,
     values
   );

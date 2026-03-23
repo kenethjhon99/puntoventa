@@ -1,11 +1,12 @@
 import { Router } from "express";
 import { listarStock, ajustarStock, crearMovimiento, listarMovimientos } from "../controllers/stock.controller.js";
 import { auth } from "../middlewares/auth.js";
+import { requireRole } from "../middlewares/requireRole.js";
 
 const router = Router();
 
-router.get("/", listarStock);
-router.put("/:id_producto",  ajustarStock);
-router.post("/movimientos", auth, crearMovimiento);
-router.get("/movimientos", auth, listarMovimientos);
+router.get("/", auth, requireRole("SUPER_ADMIN", "ADMIN"), listarStock);
+router.put("/:id_producto", auth, requireRole("SUPER_ADMIN", "ADMIN"), ajustarStock);
+router.post("/movimientos", auth, requireRole("SUPER_ADMIN", "ADMIN"), crearMovimiento);
+router.get("/movimientos", auth, requireRole("SUPER_ADMIN", "ADMIN"), listarMovimientos);
 export default router;

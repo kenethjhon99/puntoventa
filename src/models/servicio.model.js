@@ -18,6 +18,7 @@ const ESTADOS_ORDEN_REPARACION = [
   "LISTO",
   "ENTREGADO",
 ];
+const ROLES_TECNICO_ASIGNABLES = ["MECANICO", "ADMIN", "SUPER_ADMIN"];
 
 const canMoveToNextEstado = (estadoActual, siguienteEstado, estadosPermitidos) => {
   const actual = String(estadoActual || "").trim().toUpperCase();
@@ -44,6 +45,59 @@ const slugify = (value = "") =>
     .trim()
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/^-+|-+$/g, "");
+
+const getTecnicoAsignableById = async (idUsuario) => {
+  const result = await pool.query(
+    `
+      SELECT
+        u.id_usuario,
+        u.username,
+        u.nombre,
+        ARRAY_AGG(DISTINCT UPPER(TRIM(r.nombre_rol))) AS roles
+      FROM "Usuario" u
+      INNER JOIN "Detalle_usuario" du
+        ON du.id_usuario = u.id_usuario
+       AND COALESCE(du.activo, true) = true
+      INNER JOIN "Rol" r
+        ON r.id_rol = du.id_rol
+      WHERE u.id_usuario = $1
+        AND COALESCE(u.activo, true) = true
+        AND UPPER(TRIM(r.nombre_rol)) = ANY($2::text[])
+      GROUP BY u.id_usuario, u.username, u.nombre
+      LIMIT 1
+    `,
+    [Number(idUsuario), ROLES_TECNICO_ASIGNABLES]
+  );
+
+  return result.rows[0] || null;
+};
+
+export const getTecnicosAsignables = async () => {
+  const result = await pool.query(
+    `
+      SELECT
+        u.id_usuario,
+        u.username,
+        u.nombre,
+        ARRAY_AGG(DISTINCT UPPER(TRIM(r.nombre_rol)) ORDER BY UPPER(TRIM(r.nombre_rol))) AS roles
+      FROM "Usuario" u
+      INNER JOIN "Detalle_usuario" du
+        ON du.id_usuario = u.id_usuario
+       AND COALESCE(du.activo, true) = true
+      INNER JOIN "Rol" r
+        ON r.id_rol = du.id_rol
+      WHERE COALESCE(u.activo, true) = true
+        AND UPPER(TRIM(r.nombre_rol)) = ANY($1::text[])
+      GROUP BY u.id_usuario, u.username, u.nombre
+      ORDER BY
+        MAX(CASE WHEN UPPER(TRIM(r.nombre_rol)) = 'MECANICO' THEN 1 ELSE 0 END) DESC,
+        COALESCE(u.nombre, u.username) ASC
+    `,
+    [ROLES_TECNICO_ASIGNABLES]
+  );
+
+  return result.rows;
+};
 
 export const getAutolavadoCatalogo = async () => {
   const [vehiculosResult, serviciosResult] = await Promise.all([
@@ -1330,12 +1384,17 @@ export const getOrdenesAutolavado = async ({ estadoTrabajo = "TODOS", limit = 30
         ao.fecha_lavado,
         ao.fecha_finalizado,
         ao.fecha_entregado,
+        ao.id_tecnico_asignado,
+        ao.tecnico_asignado_en,
+        ao.tecnico_asignado_por,
         stv.nombre AS tipo_vehiculo_nombre,
         stv.icono AS tipo_vehiculo_icono,
         sc.nombre AS servicio_nombre,
         sc.duracion_minutos,
         u.nombre AS usuario_nombre,
-        u.username
+        u.username,
+        tu.nombre AS tecnico_nombre,
+        tu.username AS tecnico_username
       FROM "Autolavado_orden" ao
       INNER JOIN "Servicio_tipo_vehiculo" stv
         ON stv.id_tipo_vehiculo = ao.id_tipo_vehiculo
@@ -1343,6 +1402,8 @@ export const getOrdenesAutolavado = async ({ estadoTrabajo = "TODOS", limit = 30
         ON sc.id_servicio_catalogo = ao.id_servicio_catalogo
       INNER JOIN "Usuario" u
         ON u.id_usuario = ao.id_usuario
+      LEFT JOIN "Usuario" tu
+        ON tu.id_usuario = ao.id_tecnico_asignado
       ${whereSql}
       ORDER BY
         CASE ao.estado_trabajo
@@ -1360,6 +1421,46 @@ export const getOrdenesAutolavado = async ({ estadoTrabajo = "TODOS", limit = 30
   );
 
   return result.rows;
+};
+
+export const asignarTecnicoOrdenAutolavado = async (
+  idAutolavadoOrden,
+  idTecnicoAsignado = null,
+  actorId = null
+) => {
+  const idOrden = Number(idAutolavadoOrden);
+  const tecnicoId =
+    idTecnicoAsignado == null || idTecnicoAsignado === ""
+      ? null
+      : Number(idTecnicoAsignado);
+
+  if (tecnicoId !== null) {
+    const tecnico = await getTecnicoAsignableById(tecnicoId);
+    if (!tecnico) {
+      const error = new Error("Tecnico no disponible para asignacion");
+      error.statusCode = 404;
+      throw error;
+    }
+  }
+
+  const result = await pool.query(
+    `
+      UPDATE "Autolavado_orden"
+      SET id_tecnico_asignado = $1,
+          tecnico_asignado_en = CASE WHEN $1 IS NULL THEN NULL ELSE now() END,
+          tecnico_asignado_por = CASE WHEN $1 IS NULL THEN NULL ELSE $2 END,
+          updated_by = $2
+      WHERE id_autolavado_orden = $3
+      RETURNING
+        id_autolavado_orden,
+        id_tecnico_asignado,
+        tecnico_asignado_en,
+        tecnico_asignado_por
+    `,
+    [tecnicoId, actorId, idOrden]
+  );
+
+  return result.rows[0] || null;
 };
 
 export const updateEstadoOrdenAutolavado = async (
@@ -1475,12 +1576,17 @@ export const getOrdenesReparacion = async ({ estadoTrabajo = "TODOS", limit = 30
         ro.fecha_pruebas,
         ro.fecha_listo,
         ro.fecha_entregado,
+        ro.id_tecnico_asignado,
+        ro.tecnico_asignado_en,
+        ro.tecnico_asignado_por,
         stv.nombre AS tipo_vehiculo_nombre,
         stv.icono AS tipo_vehiculo_icono,
         sc.nombre AS servicio_nombre,
         sc.duracion_minutos,
         u.nombre AS usuario_nombre,
         u.username,
+        tu.nombre AS tecnico_nombre,
+        tu.username AS tecnico_username,
         COALESCE(repuestos.productos_usados, '[]'::json) AS productos_usados,
         COALESCE(repuestos.productos_cantidad_total, 0) AS productos_cantidad_total,
         COALESCE(repuestos.productos_total_cobrado, 0) AS productos_total_cobrado
@@ -1491,6 +1597,8 @@ export const getOrdenesReparacion = async ({ estadoTrabajo = "TODOS", limit = 30
         ON sc.id_servicio_catalogo = ro.id_servicio_catalogo
       INNER JOIN "Usuario" u
         ON u.id_usuario = ro.id_usuario
+      LEFT JOIN "Usuario" tu
+        ON tu.id_usuario = ro.id_tecnico_asignado
       LEFT JOIN LATERAL (
         SELECT
           COALESCE(
@@ -1536,6 +1644,46 @@ export const getOrdenesReparacion = async ({ estadoTrabajo = "TODOS", limit = 30
   );
 
   return result.rows;
+};
+
+export const asignarTecnicoOrdenReparacion = async (
+  idReparacionOrden,
+  idTecnicoAsignado = null,
+  actorId = null
+) => {
+  const idOrden = Number(idReparacionOrden);
+  const tecnicoId =
+    idTecnicoAsignado == null || idTecnicoAsignado === ""
+      ? null
+      : Number(idTecnicoAsignado);
+
+  if (tecnicoId !== null) {
+    const tecnico = await getTecnicoAsignableById(tecnicoId);
+    if (!tecnico) {
+      const error = new Error("Tecnico no disponible para asignacion");
+      error.statusCode = 404;
+      throw error;
+    }
+  }
+
+  const result = await pool.query(
+    `
+      UPDATE "Reparacion_orden"
+      SET id_tecnico_asignado = $1,
+          tecnico_asignado_en = CASE WHEN $1 IS NULL THEN NULL ELSE now() END,
+          tecnico_asignado_por = CASE WHEN $1 IS NULL THEN NULL ELSE $2 END,
+          updated_by = $2
+      WHERE id_reparacion_orden = $3
+      RETURNING
+        id_reparacion_orden,
+        id_tecnico_asignado,
+        tecnico_asignado_en,
+        tecnico_asignado_por
+    `,
+    [tecnicoId, actorId, idOrden]
+  );
+
+  return result.rows[0] || null;
 };
 
 export const updateEstadoOrdenReparacion = async (

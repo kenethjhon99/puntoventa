@@ -48,6 +48,13 @@ const normalizeProductoOrdenPayload = (body = {}) => ({
       : String(body.cobra_al_cliente).trim().toLowerCase() !== "false",
 });
 
+const normalizeTecnicoPayload = (body = {}) => ({
+  idTecnico:
+    body.id_tecnico == null || body.id_tecnico === ""
+      ? null
+      : Number(body.id_tecnico),
+});
+
 const normalizeProductosPayload = (items = []) =>
   Array.isArray(items)
     ? items.map((item) => normalizeProductoOrdenPayload(item))
@@ -457,6 +464,15 @@ export const listarOrdenesReparacion = async (req, res) => {
   }
 };
 
+export const listarTecnicosAsignables = async (req, res) => {
+  try {
+    const tecnicos = await Servicio.getTecnicosAsignables();
+    res.json({ ok: true, data: tecnicos });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+};
+
 export const agregarProductoOrdenReparacion = async (req, res) => {
   try {
     const idReparacionOrden = Number(req.params.id);
@@ -517,6 +533,38 @@ export const actualizarEstadoOrdenAutolavado = async (req, res) => {
   }
 };
 
+export const asignarTecnicoOrdenAutolavado = async (req, res) => {
+  try {
+    const idAutolavadoOrden = Number(req.params.id);
+    const payload = normalizeTecnicoPayload(req.body);
+
+    if (!Number.isInteger(idAutolavadoOrden) || idAutolavadoOrden <= 0) {
+      return res.status(400).json({ error: "id_autolavado_orden invalido" });
+    }
+
+    if (
+      payload.idTecnico !== null &&
+      (!Number.isInteger(payload.idTecnico) || payload.idTecnico <= 0)
+    ) {
+      return res.status(400).json({ error: "id_tecnico invalido" });
+    }
+
+    const orden = await Servicio.asignarTecnicoOrdenAutolavado(
+      idAutolavadoOrden,
+      payload.idTecnico,
+      req.user?.id_usuario ?? null
+    );
+
+    if (!orden) {
+      return res.status(404).json({ error: "Orden de autolavado no encontrada" });
+    }
+
+    res.json({ ok: true, orden });
+  } catch (error) {
+    res.status(error.statusCode || 400).json({ error: error.message });
+  }
+};
+
 export const actualizarEstadoOrdenReparacion = async (req, res) => {
   try {
     const idReparacionOrden = Number(req.params.id);
@@ -533,6 +581,38 @@ export const actualizarEstadoOrdenReparacion = async (req, res) => {
     const orden = await Servicio.updateEstadoOrdenReparacion(
       idReparacionOrden,
       estadoTrabajo,
+      req.user?.id_usuario ?? null
+    );
+
+    if (!orden) {
+      return res.status(404).json({ error: "Orden de reparacion no encontrada" });
+    }
+
+    res.json({ ok: true, orden });
+  } catch (error) {
+    res.status(error.statusCode || 400).json({ error: error.message });
+  }
+};
+
+export const asignarTecnicoOrdenReparacion = async (req, res) => {
+  try {
+    const idReparacionOrden = Number(req.params.id);
+    const payload = normalizeTecnicoPayload(req.body);
+
+    if (!Number.isInteger(idReparacionOrden) || idReparacionOrden <= 0) {
+      return res.status(400).json({ error: "id_reparacion_orden invalido" });
+    }
+
+    if (
+      payload.idTecnico !== null &&
+      (!Number.isInteger(payload.idTecnico) || payload.idTecnico <= 0)
+    ) {
+      return res.status(400).json({ error: "id_tecnico invalido" });
+    }
+
+    const orden = await Servicio.asignarTecnicoOrdenReparacion(
+      idReparacionOrden,
+      payload.idTecnico,
       req.user?.id_usuario ?? null
     );
 

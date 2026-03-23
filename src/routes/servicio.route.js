@@ -6,6 +6,8 @@ import {
   actualizarTipoVehiculoAutolavado,
   actualizarServicioReparacion,
   actualizarServicioAutolavado,
+  asignarTecnicoOrdenAutolavado,
+  asignarTecnicoOrdenReparacion,
   actualizarEstadoOrdenReparacion,
   actualizarEstadoOrdenAutolavado,
   agregarProductoOrdenReparacion,
@@ -21,9 +23,17 @@ import {
   listarCatalogoAutolavado,
   listarOrdenesReparacion,
   listarOrdenesAutolavado,
+  listarTecnicosAsignables,
 } from "../controllers/servicio.controller.js";
 
 const router = Router();
+
+router.get(
+  "/tecnicos",
+  auth,
+  requireRole("SUPER_ADMIN", "ADMIN", "CAJERO"),
+  listarTecnicosAsignables
+);
 
 router.get(
   "/autolavado/catalogo",
@@ -72,6 +82,12 @@ router.patch(
   auth,
   requireRole("SUPER_ADMIN", "ADMIN", "CAJERO"),
   actualizarEstadoOrdenAutolavado
+);
+router.patch(
+  "/autolavado/ordenes/:id/tecnico",
+  auth,
+  requireRole("SUPER_ADMIN", "ADMIN", "CAJERO"),
+  asignarTecnicoOrdenAutolavado
 );
 router.get(
   "/reparacion/catalogo",
@@ -138,6 +154,12 @@ router.patch(
   auth,
   requireRole("SUPER_ADMIN", "ADMIN", "CAJERO"),
   actualizarEstadoOrdenReparacion
+);
+router.patch(
+  "/reparacion/ordenes/:id/tecnico",
+  auth,
+  requireRole("SUPER_ADMIN", "ADMIN", "CAJERO"),
+  asignarTecnicoOrdenReparacion
 );
 
 export default router;

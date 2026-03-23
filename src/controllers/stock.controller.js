@@ -2,7 +2,15 @@ import * as Stock from "../models/stock.model.js";
 
 export const listarStock = async (req, res) => {
   try {
-    const stock = await Stock.getStock();
+    const { q, solo_bajo_minimo } = req.query;
+    const stock = await Stock.getStock({
+      id_bodega: 1,
+      q: q ? String(q).trim() : "",
+      solo_bajo_minimo:
+        solo_bajo_minimo === "true" ||
+        solo_bajo_minimo === "1" ||
+        solo_bajo_minimo === true,
+    });
     res.json(stock);
   } catch (error) {
     res.status(500).json({ error: error.message });
@@ -73,11 +81,15 @@ export const crearMovimiento = async (req, res) => {
 
 export const listarMovimientos = async (req, res) => {
   try {
-    const { id_producto, limit } = req.query;
+    const { id_producto, limit, tipo, desde, hasta, q } = req.query;
 
     const data = await Stock.getMovimientosStock({
       id_producto: id_producto ? Number(id_producto) : null,
       id_bodega: 1,
+      tipo: tipo ? String(tipo).trim().toUpperCase() : null,
+      desde: desde ? String(desde).trim() : null,
+      hasta: hasta ? String(hasta).trim() : null,
+      q: q ? String(q).trim() : "",
       limit: limit ? Number(limit) : 50,
     });
 

@@ -771,6 +771,21 @@ export async function ensureSchema() {
 
   await pool.query(`
     ALTER TABLE "Autolavado_orden"
+    ADD COLUMN IF NOT EXISTS id_tecnico_asignado integer REFERENCES "Usuario"(id_usuario)
+  `);
+
+  await pool.query(`
+    ALTER TABLE "Autolavado_orden"
+    ADD COLUMN IF NOT EXISTS tecnico_asignado_en timestamp with time zone
+  `);
+
+  await pool.query(`
+    ALTER TABLE "Autolavado_orden"
+    ADD COLUMN IF NOT EXISTS tecnico_asignado_por integer REFERENCES "Usuario"(id_usuario)
+  `);
+
+  await pool.query(`
+    ALTER TABLE "Autolavado_orden"
     ADD COLUMN IF NOT EXISTS fecha_inicio_proceso timestamp with time zone
   `);
 
@@ -797,6 +812,11 @@ export async function ensureSchema() {
   await pool.query(`
     CREATE INDEX IF NOT EXISTS "idx_autolavado_orden_usuario_fecha"
     ON "Autolavado_orden" (id_usuario, fecha DESC)
+  `);
+
+  await pool.query(`
+    CREATE INDEX IF NOT EXISTS "idx_autolavado_orden_tecnico"
+    ON "Autolavado_orden" (id_tecnico_asignado)
   `);
 
   await pool.query(`
@@ -830,6 +850,21 @@ export async function ensureSchema() {
   await pool.query(`
     ALTER TABLE "Reparacion_orden"
     ADD COLUMN IF NOT EXISTS fecha_diagnostico timestamp with time zone
+  `);
+
+  await pool.query(`
+    ALTER TABLE "Reparacion_orden"
+    ADD COLUMN IF NOT EXISTS id_tecnico_asignado integer REFERENCES "Usuario"(id_usuario)
+  `);
+
+  await pool.query(`
+    ALTER TABLE "Reparacion_orden"
+    ADD COLUMN IF NOT EXISTS tecnico_asignado_en timestamp with time zone
+  `);
+
+  await pool.query(`
+    ALTER TABLE "Reparacion_orden"
+    ADD COLUMN IF NOT EXISTS tecnico_asignado_por integer REFERENCES "Usuario"(id_usuario)
   `);
 
   await pool.query(`
@@ -870,6 +905,11 @@ export async function ensureSchema() {
   await pool.query(`
     CREATE INDEX IF NOT EXISTS "idx_reparacion_orden_usuario_fecha"
     ON "Reparacion_orden" (id_usuario, fecha DESC)
+  `);
+
+  await pool.query(`
+    CREATE INDEX IF NOT EXISTS "idx_reparacion_orden_tecnico"
+    ON "Reparacion_orden" (id_tecnico_asignado)
   `);
 
   await pool.query(`
