@@ -1,6 +1,9 @@
-import bcrypt from "bcrypt";
 import { pool } from "../config/db.js";
 import * as U from "../models/usuario.admin.model.js";
+import {
+  hashPassword,
+  validatePasswordPolicy,
+} from "../utils/password.js";
 
 const getFechaInicioDefault = (fechaInicio) => {
   if (fechaInicio) return fechaInicio;
@@ -20,9 +23,7 @@ export const crearUsuario = async (req, res) => {
       return res.status(400).json({ error: "username requerido" });
     }
 
-    if (!password || typeof password !== "string" || password.length < 4) {
-      return res.status(400).json({ error: "password requerido (minimo 4)" });
-    }
+    validatePasswordPolicy(password);
 
     if (!persona || typeof persona !== "object") {
       return res.status(400).json({ error: "persona es requerida" });
@@ -44,7 +45,7 @@ export const crearUsuario = async (req, res) => {
       return res.status(409).json({ error: "username ya existe" });
     }
 
-    const password_hash = await bcrypt.hash(password, 10);
+    const password_hash = await hashPassword(password);
 
     const rUser = await client.query(
       `INSERT INTO "Usuario" (username, password_hash, nombre, activo, created_by, updated_by)
@@ -107,7 +108,7 @@ export const crearUsuario = async (req, res) => {
       return res.status(409).json({ error: "username ya existe" });
     }
 
-    res.status(500).json({ error: e.message });
+    res.status(e.statusCode || 500).json({ error: e.message });
   } finally {
     client.release();
   }
@@ -125,22 +126,33 @@ export const listarUsuarios = async (req, res) => {
 export const editarUsuario = async (req, res) => {
   try {
     const { id } = req.params;
-    if (!/^\d+$/.test(id)) return res.status(400).json({ error: "id inválido" });
+    if (!/^\d+$/.test(id)) return res.status(400).json({ error: "id invalido" });
 
-    const { username, nombre, persona } = req.body;
+    const { username, nombre, password, persona } = req.body;
 
-    // 1) Update usuario (si viene)
-    const u = await U.actualizarUsuarioBasico(Number(id), {
-      username: username ? String(username).trim() : null,
-      nombre: nombre ? String(nombre).trim() : null,
-    }, req.user?.id_usuario ?? null);
+    const u = await U.actualizarUsuarioBasico(
+      Number(id),
+      {
+        username: username ? String(username).trim() : null,
+        nombre: nombre ? String(nombre).trim() : null,
+      },
+      req.user?.id_usuario ?? null
+    );
 
     if (!u) return res.status(404).json({ error: "Usuario no encontrado" });
 
-    // 2) Update persona (si viene)
+    if (password !== undefined && password !== null && String(password).trim() !== "") {
+      validatePasswordPolicy(password);
+      const passwordHash = await hashPassword(password);
+      await U.actualizarPasswordHashUsuario(
+        Number(id),
+        passwordHash,
+        req.user?.id_usuario ?? null
+      );
+    }
+
     let p = null;
     if (persona && typeof persona === "object") {
-      // solo permitimos campos conocidos (seguro)
       const allowed = [
         "dpi_persona",
         "nombre",
@@ -159,16 +171,15 @@ export const editarUsuario = async (req, res) => {
 
     res.json({ ok: true, usuario: u, persona: p });
   } catch (e) {
-    // username unique -> 23505
     if (e.code === "23505") return res.status(409).json({ error: "username ya existe" });
-    res.status(500).json({ error: e.message });
+    res.status(e.statusCode || 500).json({ error: e.message });
   }
 };
 
 export const desactivarUsuario = async (req, res) => {
   try {
     const { id } = req.params;
-    if (!/^\d+$/.test(id)) return res.status(400).json({ error: "id inválido" });
+    if (!/^\d+$/.test(id)) return res.status(400).json({ error: "id invalido" });
 
     const r = await U.setActivoUsuario(Number(id), false, req.user?.id_usuario ?? null);
     if (!r) return res.status(404).json({ error: "Usuario no encontrado" });
@@ -182,7 +193,7 @@ export const desactivarUsuario = async (req, res) => {
 export const activarUsuario = async (req, res) => {
   try {
     const { id } = req.params;
-    if (!/^\d+$/.test(id)) return res.status(400).json({ error: "id inválido" });
+    if (!/^\d+$/.test(id)) return res.status(400).json({ error: "id invalido" });
 
     const r = await U.setActivoUsuario(Number(id), true, req.user?.id_usuario ?? null);
     if (!r) return res.status(404).json({ error: "Usuario no encontrado" });
@@ -198,14 +209,13 @@ export const asignarRol = async (req, res) => {
     const { id } = req.params;
     const { id_rol } = req.body;
 
-    if (!/^\d+$/.test(id)) return res.status(400).json({ error: "id inválido" });
-    if (!/^\d+$/.test(String(id_rol))) return res.status(400).json({ error: "id_rol inválido" });
+    if (!/^\d+$/.test(id)) return res.status(400).json({ error: "id invalido" });
+    if (!/^\d+$/.test(String(id_rol))) return res.status(400).json({ error: "id_rol invalido" });
 
     const u = await U.getUsuarioById(Number(id));
     if (!u) return res.status(404).json({ error: "Usuario no encontrado" });
 
     const r = await U.asignarRol(Number(id), Number(id_rol), req.user?.id_usuario ?? null);
-    // si ya existía, r será undefined
     res.json({ ok: true, asignado: !!r, detalle: r ?? null });
   } catch (e) {
     res.status(500).json({ error: e.message });
@@ -216,8 +226,8 @@ export const quitarRol = async (req, res) => {
   try {
     const { id, id_rol } = req.params;
 
-    if (!/^\d+$/.test(id)) return res.status(400).json({ error: "id inválido" });
-    if (!/^\d+$/.test(id_rol)) return res.status(400).json({ error: "id_rol inválido" });
+    if (!/^\d+$/.test(id)) return res.status(400).json({ error: "id invalido" });
+    if (!/^\d+$/.test(id_rol)) return res.status(400).json({ error: "id_rol invalido" });
 
     const r = await U.quitarRol(Number(id), Number(id_rol), req.user?.id_usuario ?? null);
     if (!r) return res.status(404).json({ error: "Ese rol no estaba asignado" });

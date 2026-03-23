@@ -56,7 +56,15 @@ export const anularVentaCompleta = async (req, res) => {
 
 export const crearVenta = async (req, res) => {
   try {
-    const { items, tipo_venta, metodo_pago, id_sucursal, id_cliente } = req.body;
+    const {
+      items,
+      tipo_venta,
+      metodo_pago,
+      id_sucursal,
+      id_cliente,
+      tipo_comprobante,
+      monto_recibido,
+    } = req.body;
 
     if (!Array.isArray(items) || items.length === 0) {
       return res.status(400).json({ error: "items es requerido" });
@@ -75,6 +83,8 @@ export const crearVenta = async (req, res) => {
       id_cliente: id_cliente ? Number(id_cliente) : null,
       tipo_venta,
       metodo_pago,
+      tipo_comprobante,
+      monto_recibido,
       items,
       id_bodega: 1
     });
@@ -119,6 +129,15 @@ export const listarVentas = async (req, res) => {
     });
 
     res.json({ ok: true, ...result });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+};
+
+export const listarComprobantesVenta = async (_req, res) => {
+  try {
+    const data = await Venta.listarComprobantesVenta();
+    res.json({ ok: true, data });
   } catch (error) {
     res.status(500).json({ error: error.message });
   }

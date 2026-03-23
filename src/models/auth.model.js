@@ -23,3 +23,15 @@ export const getRolesByUsuario = async (id_usuario) => {
   );
   return r.rows; // [{id_rol, nombre_rol}, ...]
 };
+
+export const updateUsuarioPasswordHash = async (id_usuario, password_hash, actorId = null) => {
+  const r = await pool.query(
+    `UPDATE "Usuario"
+     SET password_hash = $1,
+         updated_by = $3
+     WHERE id_usuario = $2
+     RETURNING id_usuario, username, nombre, activo`,
+    [password_hash, id_usuario, actorId]
+  );
+  return r.rows[0];
+};

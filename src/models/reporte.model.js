@@ -599,3 +599,151 @@ export const corteVentasDetalladoPro = async ({
     meta: { page: safePage, limit: safeLimit, totalRows, totalPages, top: safeTop },
   };
 };
+
+export const reporteGeneral = async ({
+  desde,
+  hasta,
+  id_sucursal = 1,
+}) => {
+  const params = [desde, hasta, Number(id_sucursal)];
+
+  const rResumenVentas = await pool.query(
+    `
+      SELECT
+        COUNT(DISTINCT v.id_venta)::int AS ventas_cantidad,
+        COALESCE(SUM((d.cantidad - d.cantidad_anulada) * d.precio_unitario), 0) AS total_ventas,
+        COALESCE(SUM((d.cantidad - d.cantidad_anulada) * (d.precio_unitario - COALESCE(d.costo_unitario, 0))), 0) AS utilidad_estimada
+      FROM "Venta" v
+      JOIN "Detalle_venta" d ON d.id_venta = v.id_venta
+      WHERE v.fecha >= $1::timestamptz
+        AND v.fecha < ($2::date + interval '1 day')
+        AND v.id_sucursal = $3
+        AND UPPER(COALESCE(v.estado, '')) <> 'ANULADA'
+    `,
+    params
+  );
+
+  const rResumenCompras = await pool.query(
+    `
+      SELECT
+        COUNT(DISTINCT c.id_compra)::int AS compras_cantidad,
+        COALESCE(SUM((d.cantidad - d.cantidad_anulada) * d.precio_compra), 0) AS total_compras
+      FROM "Compra" c
+      JOIN "Detalle_compra" d ON d.id_compra = c.id_compra
+      WHERE c.fecha >= $1::timestamptz
+        AND c.fecha < ($2::date + interval '1 day')
+        AND c.id_sucursal = $3
+        AND UPPER(COALESCE(c.estado, '')) <> 'ANULADA'
+    `,
+    params
+  );
+
+  const rVentasPorDia = await pool.query(
+    `
+      SELECT
+        TO_CHAR(DATE(v.fecha AT TIME ZONE 'America/Guatemala'), 'YYYY-MM-DD') AS fecha,
+        COUNT(DISTINCT v.id_venta)::int AS ventas,
+        COALESCE(SUM((d.cantidad - d.cantidad_anulada) * d.precio_unitario), 0) AS total_ventas,
+        COALESCE(SUM((d.cantidad - d.cantidad_anulada) * (d.precio_unitario - COALESCE(d.costo_unitario, 0))), 0) AS utilidad_estimada
+      FROM "Venta" v
+      JOIN "Detalle_venta" d ON d.id_venta = v.id_venta
+      WHERE v.fecha >= $1::timestamptz
+        AND v.fecha < ($2::date + interval '1 day')
+        AND v.id_sucursal = $3
+        AND UPPER(COALESCE(v.estado, '')) <> 'ANULADA'
+      GROUP BY DATE(v.fecha AT TIME ZONE 'America/Guatemala')
+      ORDER BY fecha ASC
+    `,
+    params
+  );
+
+  const rComprasPorFecha = await pool.query(
+    `
+      SELECT
+        TO_CHAR(DATE(c.fecha AT TIME ZONE 'America/Guatemala'), 'YYYY-MM-DD') AS fecha,
+        COUNT(DISTINCT c.id_compra)::int AS compras,
+        COALESCE(SUM((d.cantidad - d.cantidad_anulada) * d.precio_compra), 0) AS total_compras
+      FROM "Compra" c
+      JOIN "Detalle_compra" d ON d.id_compra = c.id_compra
+      WHERE c.fecha >= $1::timestamptz
+        AND c.fecha < ($2::date + interval '1 day')
+        AND c.id_sucursal = $3
+        AND UPPER(COALESCE(c.estado, '')) <> 'ANULADA'
+      GROUP BY DATE(c.fecha AT TIME ZONE 'America/Guatemala')
+      ORDER BY fecha ASC
+    `,
+    params
+  );
+
+  const rVentasProducto = await pool.query(
+    `
+      SELECT
+        p.id_producto,
+        p.nombre AS producto_nombre,
+        p.codigo_barras,
+        COALESCE(SUM(d.cantidad - d.cantidad_anulada), 0)::int AS cantidad_vendida,
+        COALESCE(SUM((d.cantidad - d.cantidad_anulada) * d.precio_unitario), 0) AS total_ventas,
+        COALESCE(SUM((d.cantidad - d.cantidad_anulada) * (d.precio_unitario - COALESCE(d.costo_unitario, 0))), 0) AS utilidad_estimada
+      FROM "Venta" v
+      JOIN "Detalle_venta" d ON d.id_venta = v.id_venta
+      JOIN "Producto" p ON p.id_producto = d.id_producto
+      WHERE v.fecha >= $1::timestamptz
+        AND v.fecha < ($2::date + interval '1 day')
+        AND v.id_sucursal = $3
+        AND UPPER(COALESCE(v.estado, '')) <> 'ANULADA'
+      GROUP BY p.id_producto, p.nombre, p.codigo_barras
+      ORDER BY total_ventas DESC, cantidad_vendida DESC
+      LIMIT 10
+    `,
+    params
+  );
+
+  const rStockBajo = await pool.query(
+    `
+      SELECT
+        p.id_producto,
+        p.nombre,
+        p.codigo_barras,
+        COALESCE(s.existencia, 0) AS stock,
+        COALESCE(s.stock_minimo, 0) AS stock_minimo,
+        GREATEST(COALESCE(s.stock_minimo, 0) - COALESCE(s.existencia, 0), 0) AS faltante
+      FROM "Producto" p
+      JOIN "Stock_producto" s
+        ON s.id_producto = p.id_producto
+       AND s.id_bodega = $1
+      WHERE COALESCE(p.activo, true) = true
+        AND COALESCE(s.stock_minimo, 0) > 0
+        AND COALESCE(s.existencia, 0) <= COALESCE(s.stock_minimo, 0)
+      ORDER BY faltante DESC, p.nombre ASC
+      LIMIT 15
+    `,
+    [Number(id_sucursal)]
+  );
+
+  const resumenVentas = rResumenVentas.rows[0] || {};
+  const resumenCompras = rResumenCompras.rows[0] || {};
+
+  return {
+    rango: {
+      desde,
+      hasta,
+      id_sucursal: Number(id_sucursal),
+    },
+    resumen: {
+      ventas_cantidad: Number(resumenVentas.ventas_cantidad || 0),
+      compras_cantidad: Number(resumenCompras.compras_cantidad || 0),
+      total_ventas: Number(resumenVentas.total_ventas || 0),
+      total_compras: Number(resumenCompras.total_compras || 0),
+      utilidad_estimada: Number(resumenVentas.utilidad_estimada || 0),
+      productos_stock_bajo: rStockBajo.rows.length,
+    },
+    ventas_por_dia: rVentasPorDia.rows,
+    compras_por_fecha: rComprasPorFecha.rows,
+    ventas_de_producto: rVentasProducto.rows,
+    productos_stock_bajo: rStockBajo.rows,
+    utilidad_por_dia: rVentasPorDia.rows.map((row) => ({
+      fecha: row.fecha,
+      utilidad_estimada: Number(row.utilidad_estimada || 0),
+    })),
+  };
+};

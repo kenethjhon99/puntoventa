@@ -1,5 +1,74 @@
 import { pool } from "../config/db.js";
 
+const TIPO_COMPROBANTE_DEFAULT = "TICKET";
+
+const emitirComprobanteVenta = async (client, tipoComprobante = TIPO_COMPROBANTE_DEFAULT) => {
+  const normalizedTipo = String(tipoComprobante || TIPO_COMPROBANTE_DEFAULT)
+    .trim()
+    .toUpperCase();
+
+  const serieResult = await client.query(
+    `
+      SELECT id_comprobante_serie, modulo, tipo_comprobante, nombre, serie, ultimo_correlativo
+      FROM "Comprobante_serie"
+      WHERE modulo = 'VENTA'
+        AND tipo_comprobante = $1
+        AND activo = true
+      ORDER BY id_comprobante_serie ASC
+      LIMIT 1
+      FOR UPDATE
+    `,
+    [normalizedTipo]
+  );
+
+  if (serieResult.rowCount === 0) {
+    throw new Error(`No existe una serie activa para el comprobante ${normalizedTipo}`);
+  }
+
+  const serie = serieResult.rows[0];
+  const correlativo = Number(serie.ultimo_correlativo || 0) + 1;
+  const numeroComprobante = `${serie.serie}-${String(correlativo).padStart(6, "0")}`;
+
+  await client.query(
+    `
+      UPDATE "Comprobante_serie"
+      SET ultimo_correlativo = $1
+      WHERE id_comprobante_serie = $2
+    `,
+    [correlativo, serie.id_comprobante_serie]
+  );
+
+  return {
+    id_comprobante_serie: serie.id_comprobante_serie,
+    tipo_comprobante: serie.tipo_comprobante,
+    serie_comprobante: serie.serie,
+    correlativo_comprobante: correlativo,
+    numero_comprobante: numeroComprobante,
+    nombre_comprobante: serie.nombre,
+  };
+};
+
+export const listarComprobantesVenta = async () => {
+  const result = await pool.query(
+    `
+      SELECT
+        id_comprobante_serie,
+        tipo_comprobante,
+        nombre,
+        serie,
+        descripcion,
+        ultimo_correlativo,
+        CONCAT(serie, '-', LPAD((COALESCE(ultimo_correlativo, 0) + 1)::text, 6, '0')) AS siguiente_numero
+      FROM "Comprobante_serie"
+      WHERE modulo = 'VENTA'
+        AND activo = true
+      ORDER BY id_comprobante_serie ASC
+    `
+  );
+
+  return result.rows;
+};
+
 export const anularDetalle = async ({ id_venta, id_detalle, cantidad, motivo, id_usuario, id_bodega = 1 }) => {
   const client = await pool.connect();
 
@@ -263,6 +332,8 @@ export const crearVenta = async ({
   id_cliente = null,
   tipo_venta,
   metodo_pago,
+  tipo_comprobante = TIPO_COMPROBANTE_DEFAULT,
+  monto_recibido = null,
   items,
   id_bodega = 1,
 }) => {
@@ -271,15 +342,60 @@ export const crearVenta = async ({
   try {
     await client.query("BEGIN");
 
+    const comprobante = await emitirComprobanteVenta(client, tipo_comprobante);
+    const metodoPagoNormalizado = String(metodo_pago ?? "EFECTIVO")
+      .trim()
+      .toUpperCase();
+    const montoRecibidoNormalizado =
+      monto_recibido == null || monto_recibido === ""
+        ? null
+        : Number(monto_recibido);
+
+    if (
+      montoRecibidoNormalizado != null &&
+      (!Number.isFinite(montoRecibidoNormalizado) || montoRecibidoNormalizado < 0)
+    ) {
+      throw new Error("monto_recibido debe ser un numero mayor o igual a 0");
+    }
+
     const rVenta = await client.query(
-  `INSERT INTO "Venta"(fecha, total, tipo_venta, metodo_pago, id_sucursal, id_usuario, id_cliente, estado)
-   VALUES (now(), 0, $1, $2, $3, $4, $5, 'COMPLETADA')
+  `INSERT INTO "Venta"(
+      fecha,
+      total,
+      tipo_venta,
+      metodo_pago,
+      id_sucursal,
+      id_usuario,
+      id_cliente,
+      estado,
+      id_comprobante_serie,
+      tipo_comprobante,
+      serie_comprobante,
+      correlativo_comprobante,
+      numero_comprobante,
+      monto_recibido,
+      cambio_entregado
+    )
+   VALUES (now(), 0, $1, $2, $3, $4, $5, 'COMPLETADA', $6, $7, $8, $9, $10, NULL, 0)
    RETURNING id_venta,
             (fecha AT TIME ZONE 'America/Guatemala') AS fecha,
             total, tipo_venta, metodo_pago, id_sucursal, id_usuario, id_cliente, estado,
+            id_comprobante_serie, tipo_comprobante, serie_comprobante, correlativo_comprobante, numero_comprobante,
+            monto_recibido, cambio_entregado,
             (anulada_en AT TIME ZONE 'America/Guatemala') AS anulada_en,
             anulada_por, motivo_anulacion`,
-  [tipo_venta ?? "CONTADO", metodo_pago ?? "EFECTIVO", id_sucursal, id_usuario, id_cliente]
+  [
+    tipo_venta ?? "CONTADO",
+    metodoPagoNormalizado,
+    id_sucursal,
+    id_usuario,
+    id_cliente,
+    comprobante.id_comprobante_serie,
+    comprobante.tipo_comprobante,
+    comprobante.serie_comprobante,
+    comprobante.correlativo_comprobante,
+    comprobante.numero_comprobante,
+  ]
 );
 
     const venta = rVenta.rows[0];
@@ -373,8 +489,22 @@ const nombreProd = rProd.rows[0].nombre;
     }
 
     const rFinal = await client.query(
-      `UPDATE "Venta" SET total = $1, utilidad_total = $2 WHERE id_venta = $3 RETURNING *`,
-      [Number(total.toFixed(2)), Number(utilidad_total.toFixed(2)), venta.id_venta]
+      `UPDATE "Venta"
+       SET total = $1,
+           utilidad_total = $2,
+           monto_recibido = $3,
+           cambio_entregado = $4
+       WHERE id_venta = $5
+       RETURNING *`,
+      [
+        Number(total.toFixed(2)),
+        Number(utilidad_total.toFixed(2)),
+        montoRecibidoNormalizado != null ? Number(montoRecibidoNormalizado.toFixed(2)) : null,
+        metodoPagoNormalizado === "EFECTIVO" && montoRecibidoNormalizado != null
+          ? Number(Math.max(0, montoRecibidoNormalizado - total).toFixed(2))
+          : 0,
+        venta.id_venta,
+      ]
     );
 
     await client.query("COMMIT");
@@ -396,10 +526,12 @@ export const getVentaById = async (id_venta) => {
         u.nombre   AS usuario_nombre,
         c.codigo   AS cliente_codigo,
         c.nombre   AS cliente_nombre,
-        c.nit      AS cliente_nit
+        c.nit      AS cliente_nit,
+        cs.nombre  AS comprobante_nombre
      FROM "Venta" v
      JOIN "Usuario" u ON u.id_usuario = v.id_usuario
      LEFT JOIN "Clientes" c ON c."Id_clientes" = v.id_cliente
+     LEFT JOIN "Comprobante_serie" cs ON cs.id_comprobante_serie = v.id_comprobante_serie
      WHERE v.id_venta = $1`,
     [id_venta]
   );
@@ -421,7 +553,16 @@ export const getDetallesByVenta = async (id_venta) => {
   return r.rows;
 };
 
-const ALLOWED_SORT = new Set(["id_venta", "fecha", "total", "utilidad_total", "estado", "id_usuario", "id_cliente"]);
+const ALLOWED_SORT = new Set([
+  "id_venta",
+  "fecha",
+  "total",
+  "utilidad_total",
+  "estado",
+  "id_usuario",
+  "id_cliente",
+  "correlativo_comprobante",
+]);
 
 export const listarVentas = async (filters) => {
   const {
@@ -493,8 +634,13 @@ export const listarVentas = async (filters) => {
       where.push(`v.id_venta = $${i++}`);
       params.push(Number(qq));
       } else {
-      where.push(`(u.username ILIKE $${i++} OR COALESCE(c.nombre, '') ILIKE $${i++} OR COALESCE(c.codigo, '') ILIKE $${i++})`);
-      params.push(`%${qq}%`, `%${qq}%`, `%${qq}%`);
+      where.push(`(
+        u.username ILIKE $${i++}
+        OR COALESCE(c.nombre, '') ILIKE $${i++}
+        OR COALESCE(c.codigo, '') ILIKE $${i++}
+        OR COALESCE(v.numero_comprobante, '') ILIKE $${i++}
+      )`);
+      params.push(`%${qq}%`, `%${qq}%`, `%${qq}%`, `%${qq}%`);
     }
   }
 
@@ -521,10 +667,12 @@ export const listarVentas = async (filters) => {
         u.nombre   AS usuario_nombre,
         c.codigo   AS cliente_codigo,
         c.nombre   AS cliente_nombre,
-        c.nit      AS cliente_nit
+        c.nit      AS cliente_nit,
+        cs.nombre  AS comprobante_nombre
      FROM "Venta" v
      JOIN "Usuario" u ON u.id_usuario = v.id_usuario
      LEFT JOIN "Clientes" c ON c."Id_clientes" = v.id_cliente
+     LEFT JOIN "Comprobante_serie" cs ON cs.id_comprobante_serie = v.id_comprobante_serie
      ${whereSql}
      ORDER BY v.${safeSortBy} ${safeSortDir}
      LIMIT $${i++} OFFSET $${i++}`,
@@ -554,10 +702,12 @@ export const getVentaCompleta = async (id_venta) => {
         u.nombre   AS usuario_nombre,
         c.codigo   AS cliente_codigo,
         c.nombre   AS cliente_nombre,
-        c.nit      AS cliente_nit
+        c.nit      AS cliente_nit,
+        cs.nombre  AS comprobante_nombre
      FROM "Venta" v
      JOIN "Usuario" u ON u.id_usuario = v.id_usuario
      LEFT JOIN "Clientes" c ON c."Id_clientes" = v.id_cliente
+     LEFT JOIN "Comprobante_serie" cs ON cs.id_comprobante_serie = v.id_comprobante_serie
      WHERE v.id_venta = $1`,
     [id_venta]
   );

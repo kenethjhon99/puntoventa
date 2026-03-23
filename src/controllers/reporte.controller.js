@@ -1,5 +1,20 @@
 import * as R from "../models/reporte.model.js";
 
+const toChart = (rows = [], labelKey, valueKey) =>
+  rows.map((row) => ({
+    label: row[labelKey],
+    value: Number(row[valueKey] || 0),
+  }));
+
+const getDefaultRange = () => {
+  const localNow = new Date();
+  const end = localNow.toISOString().slice(0, 10);
+  const startDate = new Date(localNow);
+  startDate.setDate(startDate.getDate() - 6);
+  const start = startDate.toISOString().slice(0, 10);
+  return { desde: start, hasta: end };
+};
+
 export const auditoriaCatalogo = async (req, res) => {
   try {
     const data = await R.auditoriaCatalogo({
@@ -11,6 +26,33 @@ export const auditoriaCatalogo = async (req, res) => {
     });
 
     res.json({ ok: true, ...data });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+};
+
+export const reporteGeneral = async (req, res) => {
+  try {
+    const defaultRange = getDefaultRange();
+    const desde = req.query.desde || defaultRange.desde;
+    const hasta = req.query.hasta || defaultRange.hasta;
+
+    const data = await R.reporteGeneral({
+      desde,
+      hasta,
+      id_sucursal: req.query.id_sucursal ?? 1,
+    });
+
+    res.json({
+      ok: true,
+      ...data,
+      chart_data: {
+        ventas_por_dia: toChart(data.ventas_por_dia, "fecha", "total_ventas"),
+        compras_por_fecha: toChart(data.compras_por_fecha, "fecha", "total_compras"),
+        utilidad_por_dia: toChart(data.utilidad_por_dia, "fecha", "utilidad_estimada"),
+        ventas_de_producto: toChart(data.ventas_de_producto, "producto_nombre", "total_ventas"),
+      },
+    });
   } catch (e) {
     res.status(500).json({ error: e.message });
   }

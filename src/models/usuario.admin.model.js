@@ -48,6 +48,18 @@ export const actualizarUsuarioBasico = async (id_usuario, { username, nombre }, 
   return r.rows[0];
 };
 
+export const actualizarPasswordHashUsuario = async (id_usuario, password_hash, actorId = null) => {
+  const r = await pool.query(
+    `UPDATE "Usuario"
+     SET password_hash = $1,
+         updated_by = $3
+     WHERE id_usuario = $2
+     RETURNING id_usuario, username, nombre, activo, created_at, updated_at`,
+    [password_hash, id_usuario, actorId]
+  );
+  return r.rows[0];
+};
+
 export const actualizarPersona = async (id_usuario, data, actorId = null) => {
   const fields = [];
   const values = [];

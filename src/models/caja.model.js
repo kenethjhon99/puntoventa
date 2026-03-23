@@ -83,6 +83,7 @@ export const abrirCaja = async ({
 export const listarSesionesCaja = async ({
   id_usuario = null,
   estado = "TODOS",
+  q = "",
   page = 1,
   limit = 10,
 }) => {
@@ -98,6 +99,13 @@ export const listarSesionesCaja = async ({
     params.push(Number(id_usuario));
   }
 
+  const queryText = String(q || "").trim();
+  if (queryText) {
+    where.push(`(u.username ILIKE $${index} OR COALESCE(u.nombre, '') ILIKE $${index})`);
+    params.push(`%${queryText}%`);
+    index += 1;
+  }
+
   const estadoNormalizado = String(estado || "TODOS").trim().toUpperCase();
   if (estadoNormalizado === "ABIERTA" || estadoNormalizado === "CERRADA") {
     where.push(`cs.estado = $${index++}`);
@@ -107,7 +115,12 @@ export const listarSesionesCaja = async ({
   const whereSql = where.length ? `WHERE ${where.join(" AND ")}` : "";
 
   const countResult = await pool.query(
-    `SELECT COUNT(*)::int AS total FROM "Caja_sesion" cs ${whereSql}`,
+    `
+      SELECT COUNT(*)::int AS total
+      FROM "Caja_sesion" cs
+      JOIN "Usuario" u ON u.id_usuario = cs.id_usuario
+      ${whereSql}
+    `,
     params
   );
 
@@ -147,6 +160,7 @@ export const listarSesionesCaja = async ({
       totalRows,
       totalPages: Math.ceil(totalRows / safeLimit),
       estado: estadoNormalizado,
+      q: queryText,
     },
   };
 };
@@ -213,22 +227,94 @@ export const getCajaResumen = async (id_caja_sesion) => {
     ]
   );
 
+  const serviciosResult = await pool.query(
+    `
+      SELECT
+        COUNT(*) FILTER (WHERE estado = 'PAGADO')::int AS servicios_cantidad,
+        COALESCE(SUM(monto_cobrado) FILTER (WHERE estado = 'PAGADO'), 0) AS total_servicios,
+        COALESCE(SUM(monto_cobrado) FILTER (WHERE estado = 'PAGADO' AND metodo_pago = 'EFECTIVO'), 0) AS total_servicios_efectivo,
+        COALESCE(SUM(monto_cobrado) FILTER (WHERE estado = 'PAGADO' AND metodo_pago = 'TARJETA'), 0) AS total_servicios_tarjeta,
+        COALESCE(SUM(monto_cobrado) FILTER (WHERE estado = 'PAGADO' AND metodo_pago = 'TRANSFERENCIA'), 0) AS total_servicios_transferencia
+      FROM "Autolavado_orden"
+      WHERE id_caja_sesion = $1
+    `,
+    [Number(id_caja_sesion)]
+  );
+
+  const reparacionesResult = await pool.query(
+    `
+      SELECT
+        COUNT(*) FILTER (WHERE estado = 'PAGADO')::int AS reparaciones_cantidad,
+        COALESCE(SUM(monto_cobrado) FILTER (WHERE estado = 'PAGADO'), 0) AS total_reparaciones,
+        COALESCE(SUM(monto_cobrado) FILTER (WHERE estado = 'PAGADO' AND metodo_pago = 'EFECTIVO'), 0) AS total_reparaciones_efectivo,
+        COALESCE(SUM(monto_cobrado) FILTER (WHERE estado = 'PAGADO' AND metodo_pago = 'TARJETA'), 0) AS total_reparaciones_tarjeta,
+        COALESCE(SUM(monto_cobrado) FILTER (WHERE estado = 'PAGADO' AND metodo_pago = 'TRANSFERENCIA'), 0) AS total_reparaciones_transferencia
+      FROM "Reparacion_orden"
+      WHERE id_caja_sesion = $1
+    `,
+    [Number(id_caja_sesion)]
+  );
+
+  const gastosCategoriaResult = await pool.query(
+    `
+      SELECT
+        COALESCE(NULLIF(TRIM(categoria), ''), 'SIN_CATEGORIA') AS categoria,
+        COUNT(*)::int AS cantidad,
+        COALESCE(SUM(monto), 0) AS total
+      FROM "Caja_movimiento"
+      WHERE id_caja_sesion = $1
+        AND tipo = 'EGRESO'
+      GROUP BY COALESCE(NULLIF(TRIM(categoria), ''), 'SIN_CATEGORIA')
+      ORDER BY COALESCE(SUM(monto), 0) DESC, categoria ASC
+    `,
+    [Number(id_caja_sesion)]
+  );
+
   const movimientos = movimientosResult.rows[0] || {};
   const ventas = ventasResult.rows[0] || {};
+  const servicios = serviciosResult.rows[0] || {};
+  const reparaciones = reparacionesResult.rows[0] || {};
 
   const montoApertura = toNumber(sesion.monto_apertura);
   const ingresos = toNumber(movimientos.ingresos);
   const egresos = toNumber(movimientos.egresos);
   const totalEfectivo = toNumber(ventas.total_efectivo);
-  const cierreCalculado = toNumber(montoApertura + totalEfectivo + ingresos - egresos);
+  const totalServiciosEfectivo = toNumber(servicios.total_servicios_efectivo);
+  const totalReparacionesEfectivo = toNumber(reparaciones.total_reparaciones_efectivo);
+  const totalTarjeta =
+    toNumber(ventas.total_tarjeta) +
+    toNumber(servicios.total_servicios_tarjeta) +
+    toNumber(reparaciones.total_reparaciones_tarjeta);
+  const totalTransferencia =
+    toNumber(ventas.total_transferencia) +
+    toNumber(servicios.total_servicios_transferencia) +
+    toNumber(reparaciones.total_reparaciones_transferencia);
+  const cierreCalculado = toNumber(
+    montoApertura +
+      totalEfectivo +
+      totalServiciosEfectivo +
+      totalReparacionesEfectivo +
+      ingresos -
+      egresos
+  );
 
   return {
     sesion,
     resumen: {
       monto_apertura: montoApertura,
       total_efectivo: totalEfectivo,
-      total_tarjeta: toNumber(ventas.total_tarjeta),
-      total_transferencia: toNumber(ventas.total_transferencia),
+      total_servicios: toNumber(servicios.total_servicios),
+      total_servicios_efectivo: totalServiciosEfectivo,
+      total_servicios_tarjeta: toNumber(servicios.total_servicios_tarjeta),
+      total_servicios_transferencia: toNumber(servicios.total_servicios_transferencia),
+      servicios_cantidad: Number(servicios.servicios_cantidad || 0),
+      total_reparaciones: toNumber(reparaciones.total_reparaciones),
+      total_reparaciones_efectivo: totalReparacionesEfectivo,
+      total_reparaciones_tarjeta: toNumber(reparaciones.total_reparaciones_tarjeta),
+      total_reparaciones_transferencia: toNumber(reparaciones.total_reparaciones_transferencia),
+      reparaciones_cantidad: Number(reparaciones.reparaciones_cantidad || 0),
+      total_tarjeta: totalTarjeta,
+      total_transferencia: totalTransferencia,
       total_credito: toNumber(ventas.total_credito),
       total_neto_ventas: toNumber(ventas.total_neto),
       ventas_cantidad: Number(ventas.ventas_cantidad || 0),
@@ -236,6 +322,24 @@ export const getCajaResumen = async (id_caja_sesion) => {
       ingresos_manuales: ingresos,
       egresos_manuales: egresos,
       movimientos_manuales: Number(movimientos.movimientos || 0),
+      gastos_por_categoria: gastosCategoriaResult.rows.map((item) => ({
+        categoria: item.categoria,
+        cantidad: Number(item.cantidad || 0),
+        total: toNumber(item.total),
+      })),
+      conciliacion: {
+        efectivo_sistema: cierreCalculado,
+        efectivo_reportado:
+          sesion.monto_cierre_reportado != null
+            ? toNumber(sesion.monto_cierre_reportado)
+            : null,
+        diferencia_efectivo:
+          sesion.diferencia != null ? toNumber(sesion.diferencia) : null,
+        total_tarjeta: totalTarjeta,
+        total_transferencia: totalTransferencia,
+        total_credito: toNumber(ventas.total_credito),
+        total_no_efectivo: toNumber(totalTarjeta + totalTransferencia),
+      },
       cierre_calculado: cierreCalculado,
       monto_cierre_reportado: sesion.monto_cierre_reportado != null ? toNumber(sesion.monto_cierre_reportado) : null,
       diferencia: sesion.diferencia != null ? toNumber(sesion.diferencia) : null,

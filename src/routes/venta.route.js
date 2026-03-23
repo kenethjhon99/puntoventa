@@ -6,6 +6,7 @@ import {
   anularDetalleVenta,
   anularVentaCompleta,
   getVenta,
+  listarComprobantesVenta,
   listarVentas,
   getVentaCompleta,
 } from "../controllers/venta.controller.js";
@@ -13,6 +14,13 @@ import {
 const router = Router();
 
 router.post("/", auth, requireRole("ADMIN", "CAJERO"), crearVenta);
+
+router.get(
+  "/comprobantes/catalogo",
+  auth,
+  requireRole("ADMIN", "CAJERO"),
+  listarComprobantesVenta
+);
 
 router.post(
   "/:id_venta/detalles/:id_detalle/anular",

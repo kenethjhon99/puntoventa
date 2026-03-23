@@ -163,6 +163,41 @@ export async function ensureSchema() {
   `);
 
   await pool.query(`
+    ALTER TABLE "Venta"
+    ADD COLUMN IF NOT EXISTS id_comprobante_serie integer
+  `);
+
+  await pool.query(`
+    ALTER TABLE "Venta"
+    ADD COLUMN IF NOT EXISTS tipo_comprobante character varying(30)
+  `);
+
+  await pool.query(`
+    ALTER TABLE "Venta"
+    ADD COLUMN IF NOT EXISTS serie_comprobante character varying(20)
+  `);
+
+  await pool.query(`
+    ALTER TABLE "Venta"
+    ADD COLUMN IF NOT EXISTS correlativo_comprobante integer
+  `);
+
+  await pool.query(`
+    ALTER TABLE "Venta"
+    ADD COLUMN IF NOT EXISTS numero_comprobante character varying(50)
+  `);
+
+  await pool.query(`
+    ALTER TABLE "Venta"
+    ADD COLUMN IF NOT EXISTS monto_recibido numeric(12,2)
+  `);
+
+  await pool.query(`
+    ALTER TABLE "Venta"
+    ADD COLUMN IF NOT EXISTS cambio_entregado numeric(12,2) NOT NULL DEFAULT 0
+  `);
+
+  await pool.query(`
     ALTER TABLE "Compra"
     ADD COLUMN IF NOT EXISTS anulada_en timestamp with time zone
   `);
@@ -375,6 +410,493 @@ export async function ensureSchema() {
   await pool.query(`
     CREATE INDEX IF NOT EXISTS "idx_caja_movimiento_sesion_fecha"
     ON "Caja_movimiento" (id_caja_sesion, fecha DESC)
+  `);
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS "Comprobante_serie" (
+      id_comprobante_serie serial PRIMARY KEY,
+      modulo character varying(30) NOT NULL,
+      tipo_comprobante character varying(30) NOT NULL,
+      nombre character varying(80) NOT NULL,
+      serie character varying(20) NOT NULL,
+      descripcion text,
+      ultimo_correlativo integer NOT NULL DEFAULT 0,
+      activo boolean NOT NULL DEFAULT true
+    )
+  `);
+
+  await ensureAuditColumnsForTable("Comprobante_serie");
+  await ensureSoftDeleteColumnsForTable("Comprobante_serie", "activo");
+  await ensureUpdatedAtTriggerForTable("Comprobante_serie");
+
+  await pool.query(`
+    CREATE UNIQUE INDEX IF NOT EXISTS "uq_comprobante_serie_modulo_tipo_serie"
+    ON "Comprobante_serie" (modulo, tipo_comprobante, serie)
+  `);
+
+  await pool.query(`
+    INSERT INTO "Comprobante_serie"
+      (modulo, tipo_comprobante, nombre, serie, descripcion, ultimo_correlativo)
+    VALUES
+      ('VENTA', 'TICKET', 'Ticket de venta', 'TKT', 'Comprobante interno de punto de venta', 0),
+      ('VENTA', 'FACTURA', 'Factura', 'FAC', 'Documento fiscal correlativo para venta', 0),
+      ('VENTA', 'CCF', 'Credito fiscal', 'CCF', 'Comprobante fiscal con serie correlativa', 0)
+    ON CONFLICT ("modulo", "tipo_comprobante", "serie") DO NOTHING
+  `);
+
+  await pool.query(`
+    UPDATE "Comprobante_serie" serie
+    SET ultimo_correlativo = GREATEST(
+      COALESCE(serie.ultimo_correlativo, 0),
+      COALESCE(data.max_correlativo, 0)
+    )
+    FROM (
+      SELECT
+        COALESCE(tipo_comprobante, 'TICKET') AS tipo_comprobante,
+        COALESCE(serie_comprobante, 'TKT') AS serie_comprobante,
+        MAX(COALESCE(correlativo_comprobante, id_venta)) AS max_correlativo
+      FROM "Venta"
+      GROUP BY COALESCE(tipo_comprobante, 'TICKET'), COALESCE(serie_comprobante, 'TKT')
+    ) data
+    WHERE serie.modulo = 'VENTA'
+      AND serie.tipo_comprobante = data.tipo_comprobante
+      AND serie.serie = data.serie_comprobante
+  `);
+
+  await pool.query(`
+    UPDATE "Venta"
+    SET tipo_comprobante = COALESCE(tipo_comprobante, 'TICKET'),
+        serie_comprobante = COALESCE(serie_comprobante, 'TKT'),
+        correlativo_comprobante = COALESCE(correlativo_comprobante, id_venta),
+        numero_comprobante = COALESCE(
+          numero_comprobante,
+          CONCAT(
+            COALESCE(serie_comprobante, 'TKT'),
+            '-',
+            LPAD(COALESCE(correlativo_comprobante, id_venta)::text, 6, '0')
+          )
+        )
+    WHERE tipo_comprobante IS NULL
+       OR serie_comprobante IS NULL
+       OR correlativo_comprobante IS NULL
+       OR numero_comprobante IS NULL
+  `);
+
+  await pool.query(`
+    UPDATE "Venta" v
+    SET id_comprobante_serie = serie.id_comprobante_serie
+    FROM "Comprobante_serie" serie
+    WHERE serie.modulo = 'VENTA'
+      AND serie.tipo_comprobante = COALESCE(v.tipo_comprobante, 'TICKET')
+      AND serie.serie = COALESCE(v.serie_comprobante, 'TKT')
+      AND (v.id_comprobante_serie IS NULL OR v.id_comprobante_serie <> serie.id_comprobante_serie)
+  `);
+
+  await pool.query(`
+    DO $$
+    BEGIN
+      IF NOT EXISTS (
+        SELECT 1
+        FROM information_schema.table_constraints
+        WHERE table_schema = 'public'
+          AND table_name = 'Venta'
+          AND constraint_name = 'fk_venta_comprobante_serie'
+      ) THEN
+        ALTER TABLE "Venta"
+        ADD CONSTRAINT fk_venta_comprobante_serie
+        FOREIGN KEY (id_comprobante_serie) REFERENCES "Comprobante_serie"(id_comprobante_serie);
+      END IF;
+    END $$;
+  `);
+
+  await pool.query(`
+    CREATE UNIQUE INDEX IF NOT EXISTS "uq_venta_numero_comprobante"
+    ON "Venta" (numero_comprobante)
+    WHERE numero_comprobante IS NOT NULL
+  `);
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS "Servicio_tipo_vehiculo" (
+      id_tipo_vehiculo serial PRIMARY KEY,
+      modulo character varying(30) NOT NULL,
+      nombre character varying(80) NOT NULL,
+      slug character varying(80) NOT NULL,
+      descripcion text,
+      icono character varying(80),
+      orden integer NOT NULL DEFAULT 0,
+      activo boolean NOT NULL DEFAULT true
+    )
+  `);
+
+  await ensureAuditColumnsForTable("Servicio_tipo_vehiculo");
+  await ensureSoftDeleteColumnsForTable("Servicio_tipo_vehiculo", "activo");
+  await ensureUpdatedAtTriggerForTable("Servicio_tipo_vehiculo");
+
+  await pool.query(`
+    CREATE UNIQUE INDEX IF NOT EXISTS "uq_servicio_tipo_vehiculo_modulo_slug"
+    ON "Servicio_tipo_vehiculo" (modulo, slug)
+  `);
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS "Servicio_catalogo" (
+      id_servicio_catalogo serial PRIMARY KEY,
+      id_tipo_vehiculo integer NOT NULL REFERENCES "Servicio_tipo_vehiculo"(id_tipo_vehiculo),
+      modulo character varying(30) NOT NULL,
+      nombre character varying(100) NOT NULL,
+      slug character varying(100) NOT NULL,
+      descripcion text,
+      precio_base numeric(12,2) NOT NULL DEFAULT 0,
+      duracion_minutos integer,
+      icono character varying(80),
+      orden integer NOT NULL DEFAULT 0,
+      activo boolean NOT NULL DEFAULT true
+    )
+  `);
+
+  await ensureAuditColumnsForTable("Servicio_catalogo");
+  await ensureSoftDeleteColumnsForTable("Servicio_catalogo", "activo");
+  await ensureUpdatedAtTriggerForTable("Servicio_catalogo");
+
+  await pool.query(`
+    CREATE UNIQUE INDEX IF NOT EXISTS "uq_servicio_catalogo_tipo_slug"
+    ON "Servicio_catalogo" (id_tipo_vehiculo, slug)
+  `);
+
+  await pool.query(`
+    INSERT INTO "Servicio_tipo_vehiculo" (
+      modulo,
+      nombre,
+      slug,
+      descripcion,
+      icono,
+      orden,
+      activo
+    )
+    SELECT
+      v.modulo,
+      v.nombre,
+      v.slug,
+      v.descripcion,
+      v.icono,
+      v.orden,
+      true
+    FROM (
+      VALUES
+        ('AUTOLAVADO', 'Moto', 'moto', 'Servicios de lavado para motocicletas.', 'two_wheeler', 1),
+        ('AUTOLAVADO', 'Carro', 'carro', 'Servicios de lavado para automoviles.', 'directions_car', 2),
+        ('AUTOLAVADO', 'Pickup', 'pickup', 'Servicios de limpieza para pickups y camionetas.', 'airport_shuttle', 3),
+        ('AUTOLAVADO', 'Camion', 'camion', 'Servicios de lavado para camiones y vehiculos pesados.', 'local_shipping', 4)
+    ) AS v(modulo, nombre, slug, descripcion, icono, orden)
+    WHERE NOT EXISTS (
+      SELECT 1
+      FROM "Servicio_tipo_vehiculo" stv
+      WHERE stv.modulo = v.modulo
+        AND stv.slug = v.slug
+    )
+  `);
+
+  await pool.query(`
+    INSERT INTO "Servicio_tipo_vehiculo" (
+      modulo,
+      nombre,
+      slug,
+      descripcion,
+      icono,
+      orden,
+      activo
+    )
+    SELECT
+      v.modulo,
+      v.nombre,
+      v.slug,
+      v.descripcion,
+      v.icono,
+      v.orden,
+      true
+    FROM (
+      VALUES
+        ('REPARACION', 'Moto', 'moto', 'Servicios de taller para motocicletas.', 'two_wheeler', 1),
+        ('REPARACION', 'Sedan', 'sedan', 'Trabajos mecanicos para sedan y automoviles livianos.', 'directions_car', 2),
+        ('REPARACION', 'SUV', 'suv', 'Servicios de mecanica para SUV y camionetas familiares.', 'airport_shuttle', 3),
+        ('REPARACION', 'Pickup', 'pickup', 'Mantenimiento y reparacion para pickups de trabajo.', 'airport_shuttle', 4),
+        ('REPARACION', 'Camion', 'camion', 'Servicios mecanicos para camiones y flotillas.', 'local_shipping', 5),
+        ('REPARACION', 'Microbus', 'microbus', 'Diagnostico y mantenimiento para microbuses.', 'directions_bus', 6)
+    ) AS v(modulo, nombre, slug, descripcion, icono, orden)
+    WHERE NOT EXISTS (
+      SELECT 1
+      FROM "Servicio_tipo_vehiculo" stv
+      WHERE stv.modulo = v.modulo
+        AND stv.slug = v.slug
+    )
+  `);
+
+  await pool.query(`
+    INSERT INTO "Servicio_catalogo" (
+      id_tipo_vehiculo,
+      modulo,
+      nombre,
+      slug,
+      descripcion,
+      precio_base,
+      duracion_minutos,
+      icono,
+      orden,
+      activo
+    )
+    SELECT
+      stv.id_tipo_vehiculo,
+      data.modulo,
+      data.nombre,
+      data.slug,
+      data.descripcion,
+      data.precio_base,
+      data.duracion_minutos,
+      data.icono,
+      data.orden,
+      true
+    FROM (
+      VALUES
+        ('AUTOLAVADO', 'moto', 'Solo lavado', 'solo-lavado', 'Lavado exterior agil para motocicletas.', 20.00, 20, 'cleaning_services', 1),
+        ('AUTOLAVADO', 'moto', 'Lavado y brillo', 'lavado-y-brillo', 'Lavado con acabado brillante para motocicletas.', 30.00, 30, 'auto_awesome', 2),
+        ('AUTOLAVADO', 'moto', 'Lavado completo', 'lavado-completo', 'Lavado detallado de motocicleta con llantas y asiento.', 40.00, 40, 'workspace_premium', 3),
+        ('AUTOLAVADO', 'carro', 'Solo lavado', 'solo-lavado', 'Lavado exterior rapido para carro.', 35.00, 25, 'cleaning_services', 1),
+        ('AUTOLAVADO', 'carro', 'Lavado y aspirado', 'lavado-y-aspirado', 'Lavado exterior con aspirado basico de interior.', 50.00, 40, 'airline_seat_recline_extra', 2),
+        ('AUTOLAVADO', 'carro', 'Lavado completo', 'lavado-completo', 'Lavado, aspirado y detalles basicos del vehiculo.', 75.00, 60, 'workspace_premium', 3),
+        ('AUTOLAVADO', 'carro', 'Lavado premium', 'lavado-premium', 'Servicio completo con acabado y brillo final.', 95.00, 75, 'auto_awesome', 4),
+        ('AUTOLAVADO', 'pickup', 'Solo lavado', 'solo-lavado', 'Lavado exterior para pickup.', 45.00, 30, 'cleaning_services', 1),
+        ('AUTOLAVADO', 'pickup', 'Lavado y aspirado', 'lavado-y-aspirado', 'Lavado exterior con limpieza de cabina.', 65.00, 45, 'airline_seat_recline_extra', 2),
+        ('AUTOLAVADO', 'pickup', 'Lavado completo', 'lavado-completo', 'Servicio completo para pickup con detalles generales.', 90.00, 65, 'workspace_premium', 3),
+        ('AUTOLAVADO', 'camion', 'Lavado basico', 'lavado-basico', 'Lavado exterior basico para camion.', 80.00, 45, 'cleaning_services', 1),
+        ('AUTOLAVADO', 'camion', 'Lavado y cabina', 'lavado-y-cabina', 'Lavado exterior con limpieza de cabina.', 110.00, 70, 'airline_seat_recline_extra', 2),
+        ('AUTOLAVADO', 'camion', 'Lavado completo', 'lavado-completo', 'Servicio completo con cabina, rines y acabados.', 140.00, 90, 'workspace_premium', 3)
+    ) AS data(modulo, tipo_slug, nombre, slug, descripcion, precio_base, duracion_minutos, icono, orden)
+    INNER JOIN "Servicio_tipo_vehiculo" stv
+      ON stv.modulo = data.modulo
+     AND stv.slug = data.tipo_slug
+    WHERE NOT EXISTS (
+      SELECT 1
+      FROM "Servicio_catalogo" sc
+      WHERE sc.id_tipo_vehiculo = stv.id_tipo_vehiculo
+        AND sc.slug = data.slug
+    )
+  `);
+
+  await pool.query(`
+    INSERT INTO "Servicio_catalogo" (
+      id_tipo_vehiculo,
+      modulo,
+      nombre,
+      slug,
+      descripcion,
+      precio_base,
+      duracion_minutos,
+      icono,
+      orden,
+      activo
+    )
+    SELECT
+      stv.id_tipo_vehiculo,
+      data.modulo,
+      data.nombre,
+      data.slug,
+      data.descripcion,
+      data.precio_base,
+      data.duracion_minutos,
+      data.icono,
+      data.orden,
+      true
+    FROM (
+      VALUES
+        ('REPARACION', 'moto', 'Diagnostico general', 'diagnostico-general', 'Revision general de motocicleta para detectar fallas mecanicas.', 35.00, 30, 'build', 1),
+        ('REPARACION', 'moto', 'Cambio de aceite', 'cambio-de-aceite', 'Cambio de aceite y revision basica para motocicleta.', 55.00, 35, 'oil_barrel', 2),
+        ('REPARACION', 'moto', 'Revision de frenos', 'revision-de-frenos', 'Inspeccion y ajuste de sistema de frenos.', 65.00, 45, 'car_repair', 3),
+        ('REPARACION', 'sedan', 'Diagnostico general', 'diagnostico-general', 'Revision mecanica y electronica inicial del vehiculo.', 75.00, 45, 'build', 1),
+        ('REPARACION', 'sedan', 'Cambio de aceite', 'cambio-de-aceite', 'Cambio de aceite, filtro y revision rapida.', 120.00, 40, 'oil_barrel', 2),
+        ('REPARACION', 'sedan', 'Servicio de frenos', 'servicio-de-frenos', 'Revision, limpieza y ajuste del sistema de frenos.', 185.00, 70, 'car_repair', 3),
+        ('REPARACION', 'sedan', 'Afinacion', 'afinacion', 'Afinacion general con revision de bujias y filtros.', 240.00, 90, 'tune', 4),
+        ('REPARACION', 'suv', 'Diagnostico general', 'diagnostico-general', 'Revision integral para SUV y camionetas.', 90.00, 50, 'build', 1),
+        ('REPARACION', 'suv', 'Cambio de aceite', 'cambio-de-aceite', 'Cambio de aceite y chequeo de fluidos.', 145.00, 45, 'oil_barrel', 2),
+        ('REPARACION', 'suv', 'Suspension y direccion', 'suspension-y-direccion', 'Revision de suspension, direccion y holguras.', 260.00, 110, 'settings', 3),
+        ('REPARACION', 'pickup', 'Diagnostico general', 'diagnostico-general', 'Revision de motor, tren delantero y sistema electrico.', 95.00, 55, 'build', 1),
+        ('REPARACION', 'pickup', 'Servicio de clutch', 'servicio-de-clutch', 'Evaluacion y ajuste del sistema de clutch.', 320.00, 150, 'settings', 2),
+        ('REPARACION', 'pickup', 'Sistema electrico', 'sistema-electrico', 'Revision de alternador, bateria y cableado.', 210.00, 100, 'electrical_services', 3),
+        ('REPARACION', 'camion', 'Diagnostico general', 'diagnostico-general', 'Inspeccion general para vehiculos pesados.', 150.00, 70, 'build', 1),
+        ('REPARACION', 'camion', 'Servicio de frenos', 'servicio-de-frenos', 'Revision del sistema de frenos para camion.', 380.00, 150, 'car_repair', 2),
+        ('REPARACION', 'camion', 'Sistema electrico', 'sistema-electrico', 'Diagnostico de sistema electrico y arranque.', 340.00, 140, 'electrical_services', 3),
+        ('REPARACION', 'microbus', 'Diagnostico general', 'diagnostico-general', 'Chequeo completo para transporte liviano.', 110.00, 60, 'build', 1),
+        ('REPARACION', 'microbus', 'Afinacion', 'afinacion', 'Afinacion con pruebas operativas y revision de inyeccion.', 280.00, 110, 'tune', 2),
+        ('REPARACION', 'microbus', 'Suspension y direccion', 'suspension-y-direccion', 'Revision de suspension, bujes y direccion.', 330.00, 140, 'settings', 3)
+    ) AS data(modulo, tipo_slug, nombre, slug, descripcion, precio_base, duracion_minutos, icono, orden)
+    INNER JOIN "Servicio_tipo_vehiculo" stv
+      ON stv.modulo = data.modulo
+     AND stv.slug = data.tipo_slug
+    WHERE NOT EXISTS (
+      SELECT 1
+      FROM "Servicio_catalogo" sc
+      WHERE sc.id_tipo_vehiculo = stv.id_tipo_vehiculo
+        AND sc.slug = data.slug
+    )
+  `);
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS "Autolavado_orden" (
+      id_autolavado_orden serial PRIMARY KEY,
+      id_tipo_vehiculo integer NOT NULL REFERENCES "Servicio_tipo_vehiculo"(id_tipo_vehiculo),
+      id_servicio_catalogo integer NOT NULL REFERENCES "Servicio_catalogo"(id_servicio_catalogo),
+      id_usuario integer NOT NULL REFERENCES "Usuario"(id_usuario),
+      id_caja_sesion integer NOT NULL REFERENCES "Caja_sesion"(id_caja_sesion),
+      id_sucursal integer NOT NULL DEFAULT 1,
+      nombre_cliente character varying(150),
+      placa character varying(30),
+      color character varying(60),
+      observaciones text,
+      metodo_pago character varying(20) NOT NULL DEFAULT 'EFECTIVO',
+      precio_servicio numeric(12,2) NOT NULL DEFAULT 0,
+      monto_cobrado numeric(12,2) NOT NULL DEFAULT 0,
+      monto_recibido numeric(12,2),
+      vuelto numeric(12,2) NOT NULL DEFAULT 0,
+      estado character varying(20) NOT NULL DEFAULT 'PAGADO',
+      estado_trabajo character varying(20) NOT NULL DEFAULT 'RECIBIDO',
+      fecha timestamp with time zone NOT NULL DEFAULT now()
+    )
+  `);
+
+  await ensureAuditColumnsForTable("Autolavado_orden");
+  await ensureUpdatedAtTriggerForTable("Autolavado_orden");
+
+  await pool.query(`
+    ALTER TABLE "Autolavado_orden"
+    ADD COLUMN IF NOT EXISTS estado_trabajo character varying(20) NOT NULL DEFAULT 'RECIBIDO'
+  `);
+
+  await pool.query(`
+    ALTER TABLE "Autolavado_orden"
+    ADD COLUMN IF NOT EXISTS fecha_inicio_proceso timestamp with time zone
+  `);
+
+  await pool.query(`
+    ALTER TABLE "Autolavado_orden"
+    ADD COLUMN IF NOT EXISTS fecha_lavado timestamp with time zone
+  `);
+
+  await pool.query(`
+    ALTER TABLE "Autolavado_orden"
+    ADD COLUMN IF NOT EXISTS fecha_finalizado timestamp with time zone
+  `);
+
+  await pool.query(`
+    ALTER TABLE "Autolavado_orden"
+    ADD COLUMN IF NOT EXISTS fecha_entregado timestamp with time zone
+  `);
+
+  await pool.query(`
+    CREATE INDEX IF NOT EXISTS "idx_autolavado_orden_caja_fecha"
+    ON "Autolavado_orden" (id_caja_sesion, fecha DESC)
+  `);
+
+  await pool.query(`
+    CREATE INDEX IF NOT EXISTS "idx_autolavado_orden_usuario_fecha"
+    ON "Autolavado_orden" (id_usuario, fecha DESC)
+  `);
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS "Reparacion_orden" (
+      id_reparacion_orden serial PRIMARY KEY,
+      id_tipo_vehiculo integer NOT NULL REFERENCES "Servicio_tipo_vehiculo"(id_tipo_vehiculo),
+      id_servicio_catalogo integer NOT NULL REFERENCES "Servicio_catalogo"(id_servicio_catalogo),
+      id_usuario integer NOT NULL REFERENCES "Usuario"(id_usuario),
+      id_caja_sesion integer NOT NULL REFERENCES "Caja_sesion"(id_caja_sesion),
+      id_sucursal integer NOT NULL DEFAULT 1,
+      nombre_cliente character varying(150),
+      placa character varying(30),
+      color character varying(60),
+      kilometraje integer,
+      diagnostico_inicial text,
+      observaciones text,
+      metodo_pago character varying(20) NOT NULL DEFAULT 'EFECTIVO',
+      precio_servicio numeric(12,2) NOT NULL DEFAULT 0,
+      monto_cobrado numeric(12,2) NOT NULL DEFAULT 0,
+      monto_recibido numeric(12,2),
+      vuelto numeric(12,2) NOT NULL DEFAULT 0,
+      estado character varying(20) NOT NULL DEFAULT 'PAGADO',
+      estado_trabajo character varying(20) NOT NULL DEFAULT 'RECIBIDO',
+      fecha timestamp with time zone NOT NULL DEFAULT now()
+    )
+  `);
+
+  await ensureAuditColumnsForTable("Reparacion_orden");
+  await ensureUpdatedAtTriggerForTable("Reparacion_orden");
+
+  await pool.query(`
+    ALTER TABLE "Reparacion_orden"
+    ADD COLUMN IF NOT EXISTS fecha_diagnostico timestamp with time zone
+  `);
+
+  await pool.query(`
+    ALTER TABLE "Reparacion_orden"
+    ADD COLUMN IF NOT EXISTS fecha_en_reparacion timestamp with time zone
+  `);
+
+  await pool.query(`
+    ALTER TABLE "Reparacion_orden"
+    ADD COLUMN IF NOT EXISTS fecha_pruebas timestamp with time zone
+  `);
+
+  await pool.query(`
+    ALTER TABLE "Reparacion_orden"
+    ADD COLUMN IF NOT EXISTS fecha_listo timestamp with time zone
+  `);
+
+  await pool.query(`
+    ALTER TABLE "Reparacion_orden"
+    ADD COLUMN IF NOT EXISTS fecha_entregado timestamp with time zone
+  `);
+
+  await pool.query(`
+    ALTER TABLE "Reparacion_orden"
+    ALTER COLUMN id_caja_sesion DROP NOT NULL
+  `);
+
+  await pool.query(`
+    ALTER TABLE "Reparacion_orden"
+    ALTER COLUMN metodo_pago DROP NOT NULL
+  `);
+
+  await pool.query(`
+    CREATE INDEX IF NOT EXISTS "idx_reparacion_orden_caja_fecha"
+    ON "Reparacion_orden" (id_caja_sesion, fecha DESC)
+  `);
+
+  await pool.query(`
+    CREATE INDEX IF NOT EXISTS "idx_reparacion_orden_usuario_fecha"
+    ON "Reparacion_orden" (id_usuario, fecha DESC)
+  `);
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS "Reparacion_orden_producto" (
+      id_reparacion_orden_producto serial PRIMARY KEY,
+      id_reparacion_orden integer NOT NULL REFERENCES "Reparacion_orden"(id_reparacion_orden),
+      id_producto integer NOT NULL REFERENCES "Producto"(id_producto),
+      cantidad integer NOT NULL,
+      precio_unitario numeric(12,2) NOT NULL DEFAULT 0,
+      precio_compra_unitario numeric(12,2) NOT NULL DEFAULT 0,
+      cobra_al_cliente boolean NOT NULL DEFAULT true,
+      subtotal_cobrado numeric(12,2) NOT NULL DEFAULT 0,
+      fecha timestamp with time zone NOT NULL DEFAULT now()
+    )
+  `);
+
+  await ensureAuditColumnsForTable("Reparacion_orden_producto");
+  await ensureUpdatedAtTriggerForTable("Reparacion_orden_producto");
+
+  await pool.query(`
+    CREATE INDEX IF NOT EXISTS "idx_reparacion_orden_producto_orden"
+    ON "Reparacion_orden_producto" (id_reparacion_orden, fecha DESC)
+  `);
+
+  await pool.query(`
+    CREATE INDEX IF NOT EXISTS "idx_reparacion_orden_producto_producto"
+    ON "Reparacion_orden_producto" (id_producto)
   `);
 
   await pool.query(`

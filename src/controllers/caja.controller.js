@@ -2,7 +2,10 @@ import * as Caja from "../models/caja.model.js";
 
 const isAdmin = (req) => {
   const roles = Array.isArray(req.user?.roles) ? req.user.roles : [];
-  return roles.some((role) => String(role).trim().toUpperCase() === "ADMIN");
+  return roles.some((role) => {
+    const normalizedRole = String(role).trim().toUpperCase();
+    return normalizedRole === "ADMIN" || normalizedRole === "SUPER_ADMIN";
+  });
 };
 
 const canAccessSession = (req, sesion) => {
@@ -117,6 +120,7 @@ export const listarSesiones = async (req, res) => {
     const data = await Caja.listarSesionesCaja({
       id_usuario: isAdmin(req) ? req.query.id_usuario ?? null : req.user.id_usuario,
       estado: req.query.estado,
+      q: req.query.q,
       page: req.query.page,
       limit: req.query.limit,
     });

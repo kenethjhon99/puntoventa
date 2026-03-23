@@ -14,6 +14,7 @@ import compraRouter from "./routes/compra.route.js";
 import proveedorRouter from "./routes/proveedor.route.js";
 import clienteRouter from "./routes/cliente.route.js";
 import cajaRouter from "./routes/caja.route.js";
+import servicioRouter from "./routes/servicio.route.js";
 
 const app = express();
 app.use(cors({
@@ -33,6 +34,7 @@ app.use("/api/compras", compraRouter);
 app.use("/api/proveedores", proveedorRouter);
 app.use("/api/clientes", clienteRouter);
 app.use("/api/caja", cajaRouter);
+app.use("/api/servicios", servicioRouter);
 
 app.get("/api/health", async (req, res) => {
   const r = await pool.query("SELECT NOW() AS ahora");

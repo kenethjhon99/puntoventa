@@ -3,6 +3,7 @@ import { auth } from "../middlewares/auth.js";
 import { requireRole } from "../middlewares/requireRole.js";
 import {
   auditoriaCatalogo,
+  reporteGeneral,
   corteVentas,
   corteVentasDetallado,
   corteVentasDetalladoPro,
@@ -11,6 +12,7 @@ import {
 const router = Router();
 
 router.get("/auditoria", auth, requireRole("SUPER_ADMIN", "ADMIN"), auditoriaCatalogo);
+router.get("/general", auth, requireRole("SUPER_ADMIN", "ADMIN"), reporteGeneral);
 router.get("/corte", auth, requireRole("ADMIN"), corteVentas);
 router.get("/corte-detallado", auth, requireRole("ADMIN"), corteVentasDetallado);
 router.get("/corte-detallado-pro", auth, requireRole("ADMIN"), corteVentasDetalladoPro);

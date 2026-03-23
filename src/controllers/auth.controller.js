@@ -1,8 +1,11 @@
-import bcrypt from "bcrypt";
 import jwt from "jsonwebtoken";
-import * as Usuario from "../models/usuario.model.js";
 import { pool } from "../config/db.js";
 import * as Auth from "../models/auth.model.js";
+import {
+  hashPassword,
+  validatePasswordPolicy,
+  verifyPasswordWithUpgrade,
+} from "../utils/password.js";
 
 const getFechaInicioDefault = (fechaInicio) => {
   if (fechaInicio) return fechaInicio;
@@ -27,27 +30,30 @@ export const register = async (req, res) => {
     if (!username || typeof username !== "string") {
       return res.status(400).json({ error: "username requerido" });
     }
-    if (!password || typeof password !== "string" || password.length < 4) {
-      return res.status(400).json({ error: "password requerido (mínimo 4)" });
-    }
+
+    validatePasswordPolicy(password);
+
     if (!persona || typeof persona !== "object") {
       return res.status(400).json({ error: "persona es requerida" });
     }
+
     if (!persona.nombre || !persona.apellido) {
       return res.status(400).json({ error: "persona.nombre y persona.apellido son requeridos" });
     }
 
     await client.query("BEGIN");
 
-    // 1) Verificar username único
-    const ex = await client.query(`SELECT 1 FROM "Usuario" WHERE username = $1 LIMIT 1`, [username.trim()]);
+    const ex = await client.query(
+      `SELECT 1 FROM "Usuario" WHERE username = $1 LIMIT 1`,
+      [username.trim()]
+    );
+
     if (ex.rowCount > 0) {
       await client.query("ROLLBACK");
       return res.status(409).json({ error: "username ya existe" });
     }
 
-    // 2) Crear usuario con hash
-    const password_hash = await bcrypt.hash(password, 10);
+    const password_hash = await hashPassword(password);
 
     const rUser = await client.query(
       `INSERT INTO "Usuario" (username, password_hash, nombre, activo, created_by, updated_by)
@@ -63,7 +69,6 @@ export const register = async (req, res) => {
 
     const id_usuario = rUser.rows[0].id_usuario;
 
-    // 3) Crear persona
     const rPersona = await client.query(
       `INSERT INTO "Persona"
        (dpi_persona, nombre, apellido, fecha_nacimiento, fecha_inicio, direccion_persona, telefono, estado, id_usuario, created_by, updated_by)
@@ -83,7 +88,6 @@ export const register = async (req, res) => {
       ]
     );
 
-    // 4) Asignar roles (si vienen)
     if (Array.isArray(roles)) {
       for (const id_rol of roles) {
         if (!Number.isInteger(Number(id_rol))) continue;
@@ -103,11 +107,11 @@ export const register = async (req, res) => {
       ok: true,
       usuario: rUser.rows[0],
       persona: rPersona.rows[0],
-      roles_asignados: roles
+      roles_asignados: roles,
     });
   } catch (error) {
     await client.query("ROLLBACK");
-    res.status(500).json({ error: error.message });
+    res.status(error.statusCode || 500).json({ error: error.message });
   } finally {
     client.release();
   }
@@ -115,7 +119,6 @@ export const register = async (req, res) => {
 
 export const login = async (req, res) => {
   try {
-    
     const { username, password } = req.body;
 
     if (!username || !password) {
@@ -126,20 +129,26 @@ export const login = async (req, res) => {
     if (!user) return res.status(401).json({ error: "Credenciales incorrectas" });
     if (!user.activo) return res.status(403).json({ error: "Usuario inactivo" });
 
-    const ok = await bcrypt.compare(password, user.password_hash);
+    const ok = await verifyPasswordWithUpgrade({
+      plainPassword: password,
+      storedPasswordHash: user.password_hash,
+      onLegacyUpgrade: async (upgradedHash) => {
+        await Auth.updateUsuarioPasswordHash(
+          user.id_usuario,
+          upgradedHash,
+          user.id_usuario
+        );
+      },
+    });
     if (!ok) return res.status(401).json({ error: "Credenciales incorrectas" });
 
     const roles = await Auth.getRolesByUsuario(user.id_usuario);
 
-    const token = jwt.sign(
-      {
-        id_usuario: user.id_usuario,
-        username: user.username,
-        roles: roles.map(r => String(r.nombre_rol).trim().toUpperCase()), // ["ADMIN","CAJERO"]
-      },
-      process.env.JWT_SECRET,
-      { expiresIn: process.env.JWT_EXPIRES || "8h" }
-    );
+    const token = signToken({
+      id_usuario: user.id_usuario,
+      username: user.username,
+      roles: roles.map((r) => String(r.nombre_rol).trim().toUpperCase()),
+    });
 
     return res.json({
       ok: true,
