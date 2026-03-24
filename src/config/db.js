@@ -119,7 +119,7 @@ const ensureUpdatedAtTriggerForTable = async (tableName) => {
         EXECUTE 'CREATE TRIGGER ${triggerName}
         BEFORE UPDATE ON "${tableName}"
         FOR EACH ROW
-        EXECUTE FUNCTION set_updated_at_column()';
+        EXECUTE FUNCTION public.set_updated_at_column()';
       END IF;
     END $$;
   `);
@@ -127,7 +127,11 @@ const ensureUpdatedAtTriggerForTable = async (tableName) => {
 
 export async function ensureSchema() {
   await pool.query(`
-    CREATE OR REPLACE FUNCTION set_updated_at_column()
+    CREATE SCHEMA IF NOT EXISTS public
+  `);
+
+  await pool.query(`
+    CREATE OR REPLACE FUNCTION public.set_updated_at_column()
     RETURNS trigger AS $$
     BEGIN
       NEW.updated_at = now();
