@@ -28,6 +28,7 @@ export const pool = new Pool({
   database: process.env.PGDATABASE,
   user: process.env.PGUSER,
   password: process.env.PGPASSWORD,
+  options: process.env.PGOPTIONS || "-c search_path=public",
   ssl: shouldUseSSL() ? { rejectUnauthorized: false } : false,
 });
 
