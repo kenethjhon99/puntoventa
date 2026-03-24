@@ -5,13 +5,30 @@ dotenv.config();
 
 const { Pool } = pg;
 
+const isRemotePostgresHost = (host) => {
+  const normalizedHost = String(host || "").trim().toLowerCase();
+
+  if (!normalizedHost) return false;
+
+  return !["localhost", "127.0.0.1"].includes(normalizedHost);
+};
+
+const shouldUseSSL = () => {
+  const sslMode = String(process.env.PGSSLMODE || "").trim().toLowerCase();
+
+  if (["disable", "false", "0"].includes(sslMode)) return false;
+  if (["require", "prefer", "true", "1"].includes(sslMode)) return true;
+
+  return isRemotePostgresHost(process.env.PGHOST);
+};
+
 export const pool = new Pool({
   host: process.env.PGHOST,
   port: Number(process.env.PGPORT || 5432),
   database: process.env.PGDATABASE,
   user: process.env.PGUSER,
   password: process.env.PGPASSWORD,
-  ssl: false,
+  ssl: shouldUseSSL() ? { rejectUnauthorized: false } : false,
 });
 
 const AUDIT_TABLES = [

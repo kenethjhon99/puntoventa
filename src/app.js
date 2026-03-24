@@ -16,11 +16,51 @@ import clienteRouter from "./routes/cliente.route.js";
 import cajaRouter from "./routes/caja.route.js";
 import servicioRouter from "./routes/servicio.route.js";
 
+const parseAllowedOrigins = () => {
+  const envOrigins = [
+    process.env.FRONTEND_URL,
+    process.env.CORS_ORIGINS,
+  ]
+    .filter(Boolean)
+    .flatMap((value) => String(value).split(","))
+    .map((value) => value.trim())
+    .filter(Boolean);
+
+  return new Set(["http://localhost:5173", ...envOrigins]);
+};
+
+const isAllowedVercelPreview = (origin) => {
+  if (process.env.CORS_ALLOW_VERCEL_PREVIEWS !== "true") return false;
+
+  try {
+    const { hostname } = new URL(origin);
+    return hostname.endsWith(".vercel.app");
+  } catch {
+    return false;
+  }
+};
+
 const app = express();
-app.use(cors({
-    origin: "http://localhost:5173",
+app.use(
+  cors({
+    origin(origin, callback) {
+      const allowedOrigins = parseAllowedOrigins();
+
+      if (!origin) {
+        callback(null, true);
+        return;
+      }
+
+      if (allowedOrigins.has(origin) || isAllowedVercelPreview(origin)) {
+        callback(null, true);
+        return;
+      }
+
+      callback(new Error(`Origen no permitido por CORS: ${origin}`));
+    },
     credentials: true,
-  }));
+  })
+);
 app.use(express.json());
 app.use(formatDates(["fecha", "anulada_en"]));
 app.use("/api/productos", productoRouter);
