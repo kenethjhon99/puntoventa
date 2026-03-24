@@ -1,5 +1,6 @@
 import dotenv from "dotenv";
 import pg from "pg";
+import { hashPassword } from "../utils/password.js";
 
 dotenv.config();
 
@@ -64,6 +65,112 @@ const SOFT_DELETE_TABLES = [
 
 const sanitizeTriggerName = (tableName) =>
   `trg_${String(tableName).toLowerCase().replace(/[^a-z0-9]+/g, "_")}_updated_at`;
+
+const getBootstrapRoles = () => {
+  return String(process.env.BOOTSTRAP_ROLES || "SUPER_ADMIN")
+    .split(",")
+    .map((value) => value.trim().toUpperCase())
+    .filter(Boolean);
+};
+
+const ensureBootstrapUser = async () => {
+  const username = String(process.env.BOOTSTRAP_USERNAME || "").trim();
+  const password = String(process.env.BOOTSTRAP_PASSWORD || "");
+
+  if (!username || !password) return;
+
+  const nombre = String(process.env.BOOTSTRAP_NOMBRE || "Super").trim() || "Super";
+  const apellido = String(process.env.BOOTSTRAP_APELLIDO || "Admin").trim() || "Admin";
+  const roles = getBootstrapRoles();
+
+  const client = await pool.connect();
+
+  try {
+    await client.query("BEGIN");
+
+    const passwordHash = await hashPassword(password);
+
+    let userResult = await client.query(
+      `SELECT id_usuario
+       FROM "Usuario"
+       WHERE username = $1
+       LIMIT 1`,
+      [username]
+    );
+
+    let idUsuario = userResult.rows[0]?.id_usuario ?? null;
+
+    if (!idUsuario) {
+      userResult = await client.query(
+        `INSERT INTO "Usuario" (username, password_hash, nombre, activo)
+         VALUES ($1, $2, $3, true)
+         RETURNING id_usuario`,
+        [username, passwordHash, `${nombre} ${apellido}`.trim()]
+      );
+
+      idUsuario = userResult.rows[0].id_usuario;
+
+      await client.query(
+        `INSERT INTO "Persona"
+         (nombre, apellido, fecha_inicio, estado, id_usuario)
+         VALUES ($1, $2, CURRENT_DATE, true, $3)`,
+        [nombre, apellido, idUsuario]
+      );
+    } else {
+      await client.query(
+        `UPDATE "Usuario"
+         SET password_hash = $1,
+             nombre = $2,
+             activo = true
+         WHERE id_usuario = $3`,
+        [passwordHash, `${nombre} ${apellido}`.trim(), idUsuario]
+      );
+
+      await client.query(
+        `UPDATE "Persona"
+         SET nombre = $1,
+             apellido = $2,
+             estado = true,
+             fecha_inicio = COALESCE(fecha_inicio, CURRENT_DATE)
+         WHERE id_usuario = $3`,
+        [nombre, apellido, idUsuario]
+      );
+    }
+
+    if (roles.length > 0) {
+      const roleRows = await client.query(
+        `SELECT id_rol, UPPER(TRIM(nombre_rol)) AS nombre_rol
+         FROM "Rol"
+         WHERE UPPER(TRIM(nombre_rol)) = ANY($1::text[])`,
+        [roles]
+      );
+
+      for (const role of roleRows.rows) {
+        await client.query(
+          `INSERT INTO "Detalle_usuario" (id_usuario, id_rol, activo)
+           VALUES ($1, $2, true)
+           ON CONFLICT DO NOTHING`,
+          [idUsuario, role.id_rol]
+        );
+
+        await client.query(
+          `UPDATE "Detalle_usuario"
+           SET activo = true
+           WHERE id_usuario = $1
+             AND id_rol = $2`,
+          [idUsuario, role.id_rol]
+        );
+      }
+    }
+
+    await client.query("COMMIT");
+  } catch (error) {
+    await client.query("ROLLBACK");
+    throw error;
+  } finally {
+    client.release();
+  }
+};
 
 const ensureAuditColumnsForTable = async (tableName) => {
   await pool.query(`
@@ -968,11 +1075,18 @@ export async function ensureSchema() {
 
   await pool.query(`
     INSERT INTO "Rol" (nombre_rol)
-    SELECT 'SUPER_ADMIN'
+    SELECT rol.nombre_rol
+    FROM (
+      VALUES
+        ('SUPER_ADMIN'),
+        ('ADMIN'),
+        ('CAJERO'),
+        ('MECANICO')
+    ) AS rol(nombre_rol)
     WHERE NOT EXISTS (
       SELECT 1
-      FROM "Rol"
-      WHERE UPPER(TRIM(nombre_rol)) = 'SUPER_ADMIN'
+      FROM "Rol" existing
+      WHERE UPPER(TRIM(existing.nombre_rol)) = rol.nombre_rol
     )
   `);
 
@@ -980,6 +1094,8 @@ export async function ensureSchema() {
     ALTER TABLE "Persona"
     ALTER COLUMN fecha_inicio SET DEFAULT CURRENT_DATE
   `);
+
+  await ensureBootstrapUser();
 }
 
 export async function testDB() {
