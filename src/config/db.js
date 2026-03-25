@@ -550,6 +550,21 @@ export async function ensureSchema() {
   await ensureUpdatedAtTriggerForTable("Caja_sesion");
 
   await pool.query(`
+    ALTER TABLE "Caja_sesion"
+    ADD COLUMN IF NOT EXISTS diferencia_validada_por integer REFERENCES "Usuario"(id_usuario)
+  `);
+
+  await pool.query(`
+    ALTER TABLE "Caja_sesion"
+    ADD COLUMN IF NOT EXISTS diferencia_validada_en timestamp with time zone
+  `);
+
+  await pool.query(`
+    ALTER TABLE "Caja_sesion"
+    ADD COLUMN IF NOT EXISTS diferencia_validacion_nota text
+  `);
+
+  await pool.query(`
     CREATE UNIQUE INDEX IF NOT EXISTS "uq_caja_sesion_abierta_usuario"
     ON "Caja_sesion" (id_usuario)
     WHERE estado = 'ABIERTA'
@@ -592,6 +607,21 @@ export async function ensureSchema() {
 
   await ensureAuditColumnsForTable("Caja_movimiento");
   await ensureUpdatedAtTriggerForTable("Caja_movimiento");
+
+  await pool.query(`
+    ALTER TABLE "Caja_movimiento"
+    ADD COLUMN IF NOT EXISTS autorizado_por_admin_id integer REFERENCES "Usuario"(id_usuario)
+  `);
+
+  await pool.query(`
+    ALTER TABLE "Caja_movimiento"
+    ADD COLUMN IF NOT EXISTS autorizado_por_admin_en timestamp with time zone
+  `);
+
+  await pool.query(`
+    ALTER TABLE "Caja_movimiento"
+    ADD COLUMN IF NOT EXISTS autorizacion_admin_nota text
+  `);
 
   await pool.query(`
     CREATE INDEX IF NOT EXISTS "idx_caja_movimiento_sesion_fecha"

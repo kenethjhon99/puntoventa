@@ -343,9 +343,12 @@ export const getCajaMovimientos = async (id_caja_sesion) => {
       SELECT
         cm.*,
         u.username,
-        u.nombre
+        u.nombre,
+        ua.username AS admin_autoriza_username,
+        ua.nombre AS admin_autoriza_nombre
       FROM "Caja_movimiento" cm
       JOIN "Usuario" u ON u.id_usuario = cm.id_usuario
+      LEFT JOIN "Usuario" ua ON ua.id_usuario = cm.autorizado_por_admin_id
       WHERE cm.id_caja_sesion = $1
       ORDER BY cm.fecha DESC, cm.id_caja_movimiento DESC
     `,
@@ -368,7 +371,9 @@ export const getCajaResumen = async (id_caja_sesion) => {
       SELECT
         COALESCE(SUM(monto) FILTER (WHERE tipo = 'INGRESO'), 0) AS ingresos,
         COALESCE(SUM(monto) FILTER (WHERE tipo = 'EGRESO'), 0) AS egresos,
-        COUNT(*)::int AS movimientos
+        COUNT(*)::int AS movimientos,
+        COUNT(*) FILTER (WHERE autorizado_por_admin_id IS NULL)::int AS movimientos_pendientes_validacion,
+        COUNT(*) FILTER (WHERE autorizado_por_admin_id IS NOT NULL)::int AS movimientos_validados
       FROM "Caja_movimiento"
       WHERE id_caja_sesion = $1
     `,
@@ -508,6 +513,10 @@ export const getCajaResumen = async (id_caja_sesion) => {
       ingresos_manuales: ingresos,
       egresos_manuales: egresos,
       movimientos_manuales: Number(movimientos.movimientos || 0),
+      movimientos_pendientes_validacion_count: Number(
+        movimientos.movimientos_pendientes_validacion || 0
+      ),
+      movimientos_validados_count: Number(movimientos.movimientos_validados || 0),
       gastos_por_categoria: gastosCategoriaResult.rows.map((item) => ({
         categoria: item.categoria,
         cantidad: Number(item.cantidad || 0),
@@ -558,6 +567,8 @@ export const registrarMovimientoCaja = async ({
   categoria,
   monto,
   descripcion,
+  autorizado_por_admin_id,
+  autorizacion_admin_nota = null,
 }) => {
   const sesion = await getCajaSesionById(id_caja_sesion);
   if (!sesion || sesion.estado !== "ABIERTA") {
@@ -574,6 +585,12 @@ export const registrarMovimientoCaja = async ({
     throw new Error("monto debe ser un numero mayor a 0");
   }
 
+  const adminAutorizadorId =
+    Number.isInteger(Number(autorizado_por_admin_id)) &&
+    Number(autorizado_por_admin_id) > 0
+      ? Number(autorizado_por_admin_id)
+      : null;
+
   const result = await pool.query(
     `
       INSERT INTO "Caja_movimiento" (
@@ -583,10 +600,25 @@ export const registrarMovimientoCaja = async ({
         categoria,
         monto,
         descripcion,
+        autorizado_por_admin_id,
+        autorizado_por_admin_en,
+        autorizacion_admin_nota,
         created_by,
         updated_by
       )
-      VALUES ($1, $2, $3, $4, $5, $6, $2, $2)
+      VALUES (
+        $1,
+        $2,
+        $3,
+        $4,
+        $5,
+        $6,
+        $7::integer,
+        CASE WHEN $7::integer IS NOT NULL THEN now() ELSE NULL END,
+        $8::text,
+        $2,
+        $2
+      )
       RETURNING *
     `,
     [
@@ -596,8 +628,132 @@ export const registrarMovimientoCaja = async ({
       categoria || null,
       toNumber(montoNormalizado),
       descripcion || null,
+      adminAutorizadorId,
+      autorizacion_admin_nota || null,
     ]
   );
+
+  return result.rows[0];
+};
+
+export const validarNoCobroPendienteCaja = async ({
+  id_caja_sesion,
+  modulo,
+  referencia,
+  admin_id,
+  nota = null,
+}) => {
+  const sesion = await getCajaSesionById(id_caja_sesion);
+  if (!sesion) {
+    throw new Error("Sesion de caja no encontrada");
+  }
+
+  const fechaFin = sesion.fecha_cierre || new Date().toISOString();
+  const moduloNormalizado = String(modulo || "").trim().toUpperCase();
+  const referenciaId = Number(referencia);
+  if (!Number.isInteger(referenciaId)) {
+    throw new Error("Referencia invalida para validar el no cobro");
+  }
+
+  if (moduloNormalizado === "VENTA") {
+    const result = await pool.query(
+      `
+        UPDATE "Venta" v
+        SET no_cobrado_validado_por = $1,
+            no_cobrado_validado_en = now(),
+            no_cobrado_validacion_nota = $2
+        WHERE ${buildVentaCajaWhere("v", 3)}
+          AND v.id_venta = $8
+          AND v.estado = 'NO_COBRADO'
+          AND v.no_cobrado_validado_en IS NULL
+        RETURNING v.id_venta
+      `,
+      [
+        Number(admin_id),
+        nota || null,
+        Number(id_caja_sesion),
+        Number(sesion.id_usuario),
+        Number(sesion.id_sucursal),
+        sesion.fecha_apertura,
+        fechaFin,
+        referenciaId,
+      ]
+    );
+
+    if (!result.rowCount) {
+      throw new Error("El registro no cobrado ya fue validado o no pertenece a esta caja");
+    }
+
+    return result.rows[0];
+  }
+
+  const tableName =
+    moduloNormalizado === "AUTOLAVADO"
+      ? '"Autolavado_orden"'
+      : moduloNormalizado === "REPARACION"
+        ? '"Reparacion_orden"'
+        : null;
+  const idColumn =
+    moduloNormalizado === "AUTOLAVADO"
+      ? "id_autolavado_orden"
+      : moduloNormalizado === "REPARACION"
+        ? "id_reparacion_orden"
+        : null;
+
+  if (!tableName || !idColumn) {
+    throw new Error("Modulo de no cobro no soportado");
+  }
+
+  const result = await pool.query(
+    `
+      UPDATE ${tableName}
+      SET no_cobrado_validado_por = $1,
+          no_cobrado_validado_en = now(),
+          no_cobrado_validacion_nota = $2
+      WHERE id_caja_sesion = $3
+        AND ${idColumn} = $4
+        AND estado = 'NO_COBRADO'
+        AND no_cobrado_validado_en IS NULL
+      RETURNING ${idColumn}
+    `,
+    [Number(admin_id), nota || null, Number(id_caja_sesion), referenciaId]
+  );
+
+  if (!result.rowCount) {
+    throw new Error("El registro no cobrado ya fue validado o no pertenece a esta caja");
+  }
+
+  return result.rows[0];
+};
+
+export const validarMovimientoPendienteCaja = async ({
+  id_caja_sesion,
+  id_caja_movimiento,
+  admin_id,
+  nota = null,
+}) => {
+  const result = await pool.query(
+    `
+      UPDATE "Caja_movimiento"
+      SET autorizado_por_admin_id = $1,
+          autorizado_por_admin_en = now(),
+          autorizacion_admin_nota = $2
+      WHERE id_caja_sesion = $3
+        AND id_caja_movimiento = $4
+        AND autorizado_por_admin_id IS NULL
+      RETURNING id_caja_movimiento
+    `,
+    [
+      Number(admin_id),
+      nota || null,
+      Number(id_caja_sesion),
+      Number(id_caja_movimiento),
+    ]
+  );
+
+  if (!result.rowCount) {
+    throw new Error("El movimiento ya fue validado o no pertenece a esta caja");
+  }
 
   return result.rows[0];
 };
@@ -609,6 +765,10 @@ export const cerrarCaja = async ({
   observaciones_cierre,
   validacion_no_cobro_admin_id = null,
   validacion_no_cobro_nota = null,
+  validacion_diferencia_admin_id = null,
+  validacion_diferencia_nota = null,
+  validacion_movimientos_admin_id = null,
+  validacion_movimientos_nota = null,
 }) => {
   const sesion = await getCajaSesionById(id_caja_sesion);
   if (!sesion || sesion.estado !== "ABIERTA") {
@@ -621,66 +781,18 @@ export const cerrarCaja = async ({
   }
 
   const { resumen, sesion: sesionActual } = await getCajaResumen(id_caja_sesion);
-  if (
-    Number(resumen.no_cobrados_pendientes_count || 0) > 0 &&
-    !Number.isInteger(Number(validacion_no_cobro_admin_id || 0))
-  ) {
-    throw new Error("Debes validar con un administrador los registros no cobrados antes de cerrar caja");
+  if (Number(resumen.no_cobrados_pendientes_count || 0) > 0) {
+    throw new Error("Debes validar uno por uno los registros no cobrados antes de cerrar caja");
   }
 
-  if (Number(resumen.no_cobrados_pendientes_count || 0) > 0) {
-    const fechaFin = sesionActual.fecha_cierre || new Date().toISOString();
-    const paramsVenta = [
-      Number(validacion_no_cobro_admin_id),
-      validacion_no_cobro_nota || null,
-      Number(id_caja_sesion),
-      Number(sesion.id_usuario),
-      Number(sesion.id_sucursal),
-      sesion.fecha_apertura,
-      fechaFin,
-    ];
-
-    await Promise.all([
-      pool.query(
-        `
-          UPDATE "Venta" v
-          SET no_cobrado_validado_por = $1,
-              no_cobrado_validado_en = now(),
-              no_cobrado_validacion_nota = $2
-          WHERE ${buildVentaCajaWhere("v", 3)}
-            AND v.estado = 'NO_COBRADO'
-            AND v.no_cobrado_validado_en IS NULL
-        `,
-        paramsVenta
-      ),
-      pool.query(
-        `
-          UPDATE "Autolavado_orden"
-          SET no_cobrado_validado_por = $1,
-              no_cobrado_validado_en = now(),
-              no_cobrado_validacion_nota = $2
-          WHERE id_caja_sesion = $3
-            AND estado = 'NO_COBRADO'
-            AND no_cobrado_validado_en IS NULL
-        `,
-        [Number(validacion_no_cobro_admin_id), validacion_no_cobro_nota || null, Number(id_caja_sesion)]
-      ),
-      pool.query(
-        `
-          UPDATE "Reparacion_orden"
-          SET no_cobrado_validado_por = $1,
-              no_cobrado_validado_en = now(),
-              no_cobrado_validacion_nota = $2
-          WHERE id_caja_sesion = $3
-            AND estado = 'NO_COBRADO'
-            AND no_cobrado_validado_en IS NULL
-        `,
-        [Number(validacion_no_cobro_admin_id), validacion_no_cobro_nota || null, Number(id_caja_sesion)]
-      ),
-    ]);
+  if (Number(resumen.movimientos_pendientes_validacion_count || 0) > 0) {
+    throw new Error("Debes validar uno por uno los movimientos manuales antes de cerrar caja");
   }
 
   const diferencia = toNumber(montoReportado - resumen.cierre_calculado);
+  if (Number(diferencia) !== 0 && !Number.isInteger(Number(validacion_diferencia_admin_id || 0))) {
+    throw new Error("La caja no esta cuadrada. Debes autorizar el cierre con la password de un admin");
+  }
 
   const result = await pool.query(
     `
@@ -692,8 +804,11 @@ export const cerrarCaja = async ({
         monto_cierre_calculado = $2,
         diferencia = $3,
         observaciones_cierre = $4,
-        updated_by = $5
-      WHERE id_caja_sesion = $6
+        diferencia_validada_por = $5::integer,
+        diferencia_validada_en = CASE WHEN $5::integer IS NOT NULL THEN now() ELSE diferencia_validada_en END,
+        diferencia_validacion_nota = $6::text,
+        updated_by = $7
+      WHERE id_caja_sesion = $8
       RETURNING *
     `,
     [
@@ -701,6 +816,8 @@ export const cerrarCaja = async ({
       resumen.cierre_calculado,
       diferencia,
       observaciones_cierre || null,
+      Number(validacion_diferencia_admin_id || 0) || null,
+      validacion_diferencia_nota || null,
       Number(id_usuario),
       Number(id_caja_sesion),
     ]
