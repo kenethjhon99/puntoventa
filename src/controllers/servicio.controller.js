@@ -55,6 +55,13 @@ const normalizeTecnicoPayload = (body = {}) => ({
       : Number(body.id_tecnico),
 });
 
+const normalizeNoCobroPayload = (body = {}) => ({
+  noCobrar:
+    body.no_cobrar === true ||
+    String(body.no_cobrar || "").trim().toLowerCase() === "true",
+  noCobradoMotivo: String(body.no_cobrado_motivo || "").trim() || null,
+});
+
 const normalizeProductosPayload = (items = []) =>
   Array.isArray(items)
     ? items.map((item) => normalizeProductoOrdenPayload(item))
@@ -323,6 +330,7 @@ export const actualizarServicioReparacion = async (req, res) => {
 export const cobrarServicioAutolavado = async (req, res) => {
   try {
     const payload = normalizeCobroPayload(req.body);
+    const noCobro = normalizeNoCobroPayload(req.body);
 
     if (!Number.isInteger(payload.idTipoVehiculo) || payload.idTipoVehiculo <= 0) {
       return res.status(400).json({ error: "id_tipo_vehiculo invalido" });
@@ -336,10 +344,19 @@ export const cobrarServicioAutolavado = async (req, res) => {
       return res.status(400).json({ error: "monto_cobrado invalido" });
     }
 
+    if (noCobro.noCobrar) {
+      if (!noCobro.noCobradoMotivo) {
+        return res.status(400).json({ error: "Debes indicar el motivo del no cobro" });
+      }
+    }
+
     const data = await Servicio.registrarCobroAutolavado({
       ...payload,
       idUsuario: req.user?.id_usuario ?? null,
       idSucursal: Number(req.body?.id_sucursal || 1),
+      noCobrar: noCobro.noCobrar,
+      noCobradoMotivo: noCobro.noCobradoMotivo,
+      noCobradoAutorizadoPor: null,
     });
 
     res.status(201).json({ ok: true, ...data });
@@ -352,6 +369,7 @@ export const cobrarServicioReparacion = async (req, res) => {
   try {
     const payload = normalizeCobroPayload(req.body);
     const productos = normalizeProductosPayload(req.body?.productos);
+    const noCobro = normalizeNoCobroPayload(req.body);
 
     if (!Number.isInteger(payload.idTipoVehiculo) || payload.idTipoVehiculo <= 0) {
       return res.status(400).json({ error: "id_tipo_vehiculo invalido" });
@@ -375,6 +393,12 @@ export const cobrarServicioReparacion = async (req, res) => {
       }
     }
 
+    if (noCobro.noCobrar) {
+      if (!noCobro.noCobradoMotivo) {
+        return res.status(400).json({ error: "Debes indicar el motivo del no cobro" });
+      }
+    }
+
     const data = await Servicio.registrarCobroReparacion({
       ...payload,
       kilometraje: req.body?.kilometraje,
@@ -382,6 +406,9 @@ export const cobrarServicioReparacion = async (req, res) => {
       productos,
       idUsuario: req.user?.id_usuario ?? null,
       idSucursal: Number(req.body?.id_sucursal || 1),
+      noCobrar: noCobro.noCobrar,
+      noCobradoMotivo: noCobro.noCobradoMotivo,
+      noCobradoAutorizadoPor: null,
     });
 
     res.status(201).json({ ok: true, ...data });
@@ -420,9 +447,16 @@ export const cobrarOrdenReparacion = async (req, res) => {
   try {
     const idReparacionOrden = Number(req.params.id);
     const payload = normalizeCobroPayload(req.body);
+    const noCobro = normalizeNoCobroPayload(req.body);
 
     if (!Number.isInteger(idReparacionOrden) || idReparacionOrden <= 0) {
       return res.status(400).json({ error: "id_reparacion_orden invalido" });
+    }
+
+    if (noCobro.noCobrar) {
+      if (!noCobro.noCobradoMotivo) {
+        return res.status(400).json({ error: "Debes indicar el motivo del no cobro" });
+      }
     }
 
     const data = await Servicio.cobrarOrdenReparacion({
@@ -430,6 +464,9 @@ export const cobrarOrdenReparacion = async (req, res) => {
       idUsuario: req.user?.id_usuario ?? null,
       metodoPago: payload.metodoPago,
       montoRecibido: payload.montoRecibido,
+      noCobrar: noCobro.noCobrar,
+      noCobradoMotivo: noCobro.noCobradoMotivo,
+      noCobradoAutorizadoPor: null,
     });
 
     res.json({ ok: true, ...data });

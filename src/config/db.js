@@ -298,6 +298,11 @@ export async function ensureSchema() {
 
   await pool.query(`
     ALTER TABLE "Venta"
+    ADD COLUMN IF NOT EXISTS id_caja_sesion integer
+  `);
+
+  await pool.query(`
+    ALTER TABLE "Venta"
     ADD COLUMN IF NOT EXISTS id_comprobante_serie integer
   `);
 
@@ -329,6 +334,36 @@ export async function ensureSchema() {
   await pool.query(`
     ALTER TABLE "Venta"
     ADD COLUMN IF NOT EXISTS cambio_entregado numeric(12,2) NOT NULL DEFAULT 0
+  `);
+
+  await pool.query(`
+    ALTER TABLE "Venta"
+    ADD COLUMN IF NOT EXISTS no_cobrado_motivo text
+  `);
+
+  await pool.query(`
+    ALTER TABLE "Venta"
+    ADD COLUMN IF NOT EXISTS no_cobrado_autorizado_por integer
+  `);
+
+  await pool.query(`
+    ALTER TABLE "Venta"
+    ADD COLUMN IF NOT EXISTS no_cobrado_autorizado_en timestamp with time zone
+  `);
+
+  await pool.query(`
+    ALTER TABLE "Venta"
+    ADD COLUMN IF NOT EXISTS no_cobrado_validado_por integer
+  `);
+
+  await pool.query(`
+    ALTER TABLE "Venta"
+    ADD COLUMN IF NOT EXISTS no_cobrado_validado_en timestamp with time zone
+  `);
+
+  await pool.query(`
+    ALTER TABLE "Venta"
+    ADD COLUMN IF NOT EXISTS no_cobrado_validacion_nota text
   `);
 
   await pool.query(`
@@ -523,6 +558,23 @@ export async function ensureSchema() {
   await pool.query(`
     CREATE INDEX IF NOT EXISTS "idx_caja_sesion_usuario_fecha"
     ON "Caja_sesion" (id_usuario, fecha_apertura DESC)
+  `);
+
+  await pool.query(`
+    DO $$
+    BEGIN
+      IF NOT EXISTS (
+        SELECT 1
+        FROM information_schema.table_constraints
+        WHERE table_schema = 'public'
+          AND table_name = 'Venta'
+          AND constraint_name = 'fk_venta_caja_sesion'
+      ) THEN
+        ALTER TABLE "Venta"
+        ADD CONSTRAINT fk_venta_caja_sesion
+        FOREIGN KEY (id_caja_sesion) REFERENCES "Caja_sesion"(id_caja_sesion);
+      END IF;
+    END $$;
   `);
 
   await pool.query(`
@@ -939,6 +991,36 @@ export async function ensureSchema() {
   `);
 
   await pool.query(`
+    ALTER TABLE "Autolavado_orden"
+    ADD COLUMN IF NOT EXISTS no_cobrado_motivo text
+  `);
+
+  await pool.query(`
+    ALTER TABLE "Autolavado_orden"
+    ADD COLUMN IF NOT EXISTS no_cobrado_autorizado_por integer REFERENCES "Usuario"(id_usuario)
+  `);
+
+  await pool.query(`
+    ALTER TABLE "Autolavado_orden"
+    ADD COLUMN IF NOT EXISTS no_cobrado_autorizado_en timestamp with time zone
+  `);
+
+  await pool.query(`
+    ALTER TABLE "Autolavado_orden"
+    ADD COLUMN IF NOT EXISTS no_cobrado_validado_por integer REFERENCES "Usuario"(id_usuario)
+  `);
+
+  await pool.query(`
+    ALTER TABLE "Autolavado_orden"
+    ADD COLUMN IF NOT EXISTS no_cobrado_validado_en timestamp with time zone
+  `);
+
+  await pool.query(`
+    ALTER TABLE "Autolavado_orden"
+    ADD COLUMN IF NOT EXISTS no_cobrado_validacion_nota text
+  `);
+
+  await pool.query(`
     CREATE INDEX IF NOT EXISTS "idx_autolavado_orden_caja_fecha"
     ON "Autolavado_orden" (id_caja_sesion, fecha DESC)
   `);
@@ -1019,6 +1101,36 @@ export async function ensureSchema() {
   await pool.query(`
     ALTER TABLE "Reparacion_orden"
     ADD COLUMN IF NOT EXISTS fecha_entregado timestamp with time zone
+  `);
+
+  await pool.query(`
+    ALTER TABLE "Reparacion_orden"
+    ADD COLUMN IF NOT EXISTS no_cobrado_motivo text
+  `);
+
+  await pool.query(`
+    ALTER TABLE "Reparacion_orden"
+    ADD COLUMN IF NOT EXISTS no_cobrado_autorizado_por integer REFERENCES "Usuario"(id_usuario)
+  `);
+
+  await pool.query(`
+    ALTER TABLE "Reparacion_orden"
+    ADD COLUMN IF NOT EXISTS no_cobrado_autorizado_en timestamp with time zone
+  `);
+
+  await pool.query(`
+    ALTER TABLE "Reparacion_orden"
+    ADD COLUMN IF NOT EXISTS no_cobrado_validado_por integer REFERENCES "Usuario"(id_usuario)
+  `);
+
+  await pool.query(`
+    ALTER TABLE "Reparacion_orden"
+    ADD COLUMN IF NOT EXISTS no_cobrado_validado_en timestamp with time zone
+  `);
+
+  await pool.query(`
+    ALTER TABLE "Reparacion_orden"
+    ADD COLUMN IF NOT EXISTS no_cobrado_validacion_nota text
   `);
 
   await pool.query(`

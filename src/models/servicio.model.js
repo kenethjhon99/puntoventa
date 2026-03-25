@@ -507,10 +507,17 @@ export const registrarCobroAutolavado = async ({
   metodoPago,
   montoCobrado,
   montoRecibido = null,
+  noCobrar = false,
+  noCobradoMotivo = null,
+  noCobradoAutorizadoPor = null,
 }) => {
+  const ventaSinCobro = Boolean(noCobrar);
   const metodoPagoNormalizado = String(metodoPago || "").trim().toUpperCase();
+  const metodoPagoPersistido = ventaSinCobro ? "NO_COBRADO" : metodoPagoNormalizado;
   if (!["EFECTIVO", "TARJETA", "TRANSFERENCIA"].includes(metodoPagoNormalizado)) {
-    throw new Error("metodo_pago invalido");
+    if (!ventaSinCobro) {
+      throw new Error("metodo_pago invalido");
+    }
   }
 
   const montoCobradoNormalizado = Number(montoCobrado);
@@ -524,6 +531,7 @@ export const registrarCobroAutolavado = async ({
       : Number(montoRecibido);
 
   if (
+    !ventaSinCobro &&
     metodoPagoNormalizado === "EFECTIVO" &&
     (!Number.isFinite(montoRecibidoNormalizado) ||
       montoRecibidoNormalizado < montoCobradoNormalizado)
@@ -563,7 +571,7 @@ export const registrarCobroAutolavado = async ({
   }
 
   const vuelto =
-    metodoPagoNormalizado === "EFECTIVO"
+    !ventaSinCobro && metodoPagoNormalizado === "EFECTIVO"
       ? Math.max(0, Number((montoRecibidoNormalizado - montoCobradoNormalizado).toFixed(2)))
       : 0;
 
@@ -586,12 +594,20 @@ export const registrarCobroAutolavado = async ({
         vuelto,
         estado,
         estado_trabajo,
+        no_cobrado_motivo,
+        no_cobrado_autorizado_por,
+        no_cobrado_autorizado_en,
+        no_cobrado_validado_por,
+        no_cobrado_validado_en,
+        no_cobrado_validacion_nota,
         created_by,
         updated_by
       )
       VALUES (
         $1, $2, $3, $4, $5, $6, $7, $8, $9, $10,
-        $11, $12, $13, $14, 'PAGADO', 'RECIBIDO', $3, $3
+        $11, $12, $13, $14, $15, 'RECIBIDO',
+        $16, $17, CASE WHEN $18 THEN now() ELSE NULL END, NULL, NULL, NULL,
+        $3, $3
       )
       RETURNING
         id_autolavado_orden,
@@ -611,6 +627,9 @@ export const registrarCobroAutolavado = async ({
         vuelto,
         estado,
         estado_trabajo,
+        no_cobrado_motivo,
+        no_cobrado_autorizado_por,
+        no_cobrado_autorizado_en,
         fecha
     `,
     [
@@ -623,11 +642,15 @@ export const registrarCobroAutolavado = async ({
       placa || null,
       color || null,
       observaciones || null,
-      metodoPagoNormalizado,
+      metodoPagoPersistido,
       Number(servicio.precio_base || 0),
       montoCobradoNormalizado,
-      montoRecibidoNormalizado,
+      ventaSinCobro ? null : montoRecibidoNormalizado,
       vuelto,
+      ventaSinCobro ? "NO_COBRADO" : "PAGADO",
+      ventaSinCobro ? noCobradoMotivo : null,
+      ventaSinCobro ? noCobradoAutorizadoPor : null,
+      ventaSinCobro,
     ]
   );
 
@@ -654,10 +677,17 @@ export const registrarCobroReparacion = async ({
   montoCobrado,
   montoRecibido = null,
   productos = [],
+  noCobrar = false,
+  noCobradoMotivo = null,
+  noCobradoAutorizadoPor = null,
 }) => {
+  const ventaSinCobro = Boolean(noCobrar);
   const metodoPagoNormalizado = String(metodoPago || "").trim().toUpperCase();
+  const metodoPagoPersistido = ventaSinCobro ? "NO_COBRADO" : metodoPagoNormalizado;
   if (!["EFECTIVO", "TARJETA", "TRANSFERENCIA"].includes(metodoPagoNormalizado)) {
-    throw new Error("metodo_pago invalido");
+    if (!ventaSinCobro) {
+      throw new Error("metodo_pago invalido");
+    }
   }
 
   const montoCobradoNormalizado = Number(montoCobrado);
@@ -669,6 +699,7 @@ export const registrarCobroReparacion = async ({
     montoRecibido == null || montoRecibido === "" ? null : Number(montoRecibido);
 
   if (
+    !ventaSinCobro &&
     metodoPagoNormalizado === "EFECTIVO" &&
     (!Number.isFinite(montoRecibidoNormalizado) ||
       montoRecibidoNormalizado < montoCobradoNormalizado)
@@ -786,6 +817,7 @@ export const registrarCobroReparacion = async ({
     }
 
     if (
+      !ventaSinCobro &&
       metodoPagoNormalizado === "EFECTIVO" &&
       (!Number.isFinite(montoRecibidoNormalizado) ||
         montoRecibidoNormalizado < totalCalculado)
@@ -794,7 +826,7 @@ export const registrarCobroReparacion = async ({
     }
 
     const vuelto =
-      metodoPagoNormalizado === "EFECTIVO"
+      !ventaSinCobro && metodoPagoNormalizado === "EFECTIVO"
         ? Math.max(0, Number((montoRecibidoNormalizado - totalCalculado).toFixed(2)))
         : 0;
 
@@ -819,12 +851,20 @@ export const registrarCobroReparacion = async ({
           vuelto,
           estado,
           estado_trabajo,
+          no_cobrado_motivo,
+          no_cobrado_autorizado_por,
+          no_cobrado_autorizado_en,
+          no_cobrado_validado_por,
+          no_cobrado_validado_en,
+          no_cobrado_validacion_nota,
           created_by,
           updated_by
         )
         VALUES (
           $1, $2, $3, $4, $5, $6, $7, $8, $9, $10,
-          $11, $12, $13, $14, $15, $16, 'PAGADO', 'RECIBIDO', $3, $3
+          $11, $12, $13, $14, $15, $16, $17, 'RECIBIDO',
+          $18, $19, CASE WHEN $20 THEN now() ELSE NULL END, NULL, NULL, NULL,
+          $3, $3
         )
         RETURNING
           id_reparacion_orden,
@@ -846,6 +886,9 @@ export const registrarCobroReparacion = async ({
           vuelto,
           estado,
           estado_trabajo,
+          no_cobrado_motivo,
+          no_cobrado_autorizado_por,
+          no_cobrado_autorizado_en,
           fecha
       `,
       [
@@ -860,11 +903,15 @@ export const registrarCobroReparacion = async ({
         kilometraje == null || kilometraje === "" ? null : Number(kilometraje),
         diagnosticoInicial || null,
         observaciones || null,
-        metodoPagoNormalizado,
+        metodoPagoPersistido,
         Number(servicio.precio_base || 0),
         totalCalculado,
-        montoRecibidoNormalizado,
+        ventaSinCobro ? null : montoRecibidoNormalizado,
         vuelto,
+        ventaSinCobro ? "NO_COBRADO" : "PAGADO",
+        ventaSinCobro ? noCobradoMotivo : null,
+        ventaSinCobro ? noCobradoAutorizadoPor : null,
+        ventaSinCobro,
       ]
     );
 
@@ -1055,10 +1102,17 @@ export const cobrarOrdenReparacion = async ({
   idUsuario,
   metodoPago,
   montoRecibido = null,
+  noCobrar = false,
+  noCobradoMotivo = null,
+  noCobradoAutorizadoPor = null,
 }) => {
+  const ventaSinCobro = Boolean(noCobrar);
   const metodoPagoNormalizado = String(metodoPago || "").trim().toUpperCase();
+  const metodoPagoPersistido = ventaSinCobro ? "NO_COBRADO" : metodoPagoNormalizado;
   if (!["EFECTIVO", "TARJETA", "TRANSFERENCIA"].includes(metodoPagoNormalizado)) {
-    throw new Error("metodo_pago invalido");
+    if (!ventaSinCobro) {
+      throw new Error("metodo_pago invalido");
+    }
   }
 
   const sesionCaja = await getCajaSesionActiva(idUsuario);
@@ -1105,6 +1159,7 @@ export const cobrarOrdenReparacion = async ({
     }
 
     if (
+      !ventaSinCobro &&
       metodoPagoNormalizado === "EFECTIVO" &&
       (!Number.isFinite(montoRecibidoNormalizado) || montoRecibidoNormalizado < montoTotal)
     ) {
@@ -1112,7 +1167,7 @@ export const cobrarOrdenReparacion = async ({
     }
 
     const vuelto =
-      metodoPagoNormalizado === "EFECTIVO"
+      !ventaSinCobro && metodoPagoNormalizado === "EFECTIVO"
         ? Math.max(0, Number((montoRecibidoNormalizado - montoTotal).toFixed(2)))
         : 0;
 
@@ -1123,9 +1178,12 @@ export const cobrarOrdenReparacion = async ({
             metodo_pago = $2,
             monto_recibido = $3,
             vuelto = $4,
-            estado = 'PAGADO',
-            updated_by = $5
-        WHERE id_reparacion_orden = $6
+            estado = $5,
+            no_cobrado_motivo = $6,
+            no_cobrado_autorizado_por = $7,
+            no_cobrado_autorizado_en = CASE WHEN $8 THEN now() ELSE no_cobrado_autorizado_en END,
+            updated_by = $9
+        WHERE id_reparacion_orden = $10
         RETURNING
           id_reparacion_orden,
           id_caja_sesion,
@@ -1133,13 +1191,20 @@ export const cobrarOrdenReparacion = async ({
           monto_cobrado,
           monto_recibido,
           vuelto,
-          estado
+          estado,
+          no_cobrado_motivo,
+          no_cobrado_autorizado_por,
+          no_cobrado_autorizado_en
       `,
       [
         sesionCaja.id_caja_sesion,
-        metodoPagoNormalizado,
-        montoRecibidoNormalizado,
+        metodoPagoPersistido,
+        ventaSinCobro ? null : montoRecibidoNormalizado,
         vuelto,
+        ventaSinCobro ? "NO_COBRADO" : "PAGADO",
+        ventaSinCobro ? noCobradoMotivo : null,
+        ventaSinCobro ? noCobradoAutorizadoPor : null,
+        ventaSinCobro,
         idUsuario,
         Number(idReparacionOrden),
       ]

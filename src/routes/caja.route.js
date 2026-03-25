@@ -12,11 +12,11 @@ import {
 
 const router = Router();
 
-router.get("/sesion-activa", auth, requireRole("ADMIN", "CAJERO"), getSesionActiva);
-router.get("/sesiones", auth, requireRole("ADMIN", "CAJERO"), listarSesiones);
-router.get("/:id_sesion/resumen", auth, requireRole("ADMIN", "CAJERO"), getResumenCaja);
-router.post("/apertura", auth, requireRole("ADMIN", "CAJERO"), abrirCaja);
-router.post("/:id_sesion/movimientos", auth, requireRole("ADMIN", "CAJERO"), registrarMovimiento);
-router.post("/:id_sesion/cierre", auth, requireRole("ADMIN", "CAJERO"), cerrarCaja);
+router.get("/sesion-activa", auth, requireRole("ADMIN", "CAJERO", "MECANICO"), getSesionActiva);
+router.get("/sesiones", auth, requireRole("ADMIN", "CAJERO", "MECANICO"), listarSesiones);
+router.get("/:id_sesion/resumen", auth, requireRole("ADMIN", "CAJERO", "MECANICO"), getResumenCaja);
+router.post("/apertura", auth, requireRole("ADMIN", "CAJERO", "MECANICO"), abrirCaja);
+router.post("/:id_sesion/movimientos", auth, requireRole("ADMIN", "CAJERO", "MECANICO"), registrarMovimiento);
+router.post("/:id_sesion/cierre", auth, requireRole("ADMIN", "CAJERO", "MECANICO"), cerrarCaja);
 
 export default router;

@@ -2,6 +2,178 @@ import { pool } from "../config/db.js";
 
 const toNumber = (value) => Number(Number(value || 0).toFixed(2));
 
+const buildVentaCajaWhere = (baseAlias = "v", startIndex = 1) => `
+  (
+    ${baseAlias}.id_caja_sesion = $${startIndex}
+    OR (
+      ${baseAlias}.id_caja_sesion IS NULL
+      AND ${baseAlias}.id_usuario = $${startIndex + 1}
+      AND ${baseAlias}.id_sucursal = $${startIndex + 2}
+      AND ${baseAlias}.fecha >= $${startIndex + 3}
+      AND ${baseAlias}.fecha <= $${startIndex + 4}
+    )
+  )
+`;
+
+const getNoCobrosPendientesCaja = async (id_caja_sesion, sesion, fechaFin) => {
+  const [ventasResult, autolavadoResult, reparacionesResult] = await Promise.all([
+    pool.query(
+      `
+        SELECT
+          'VENTA' AS modulo,
+          v.id_venta::text AS referencia,
+          v.numero_comprobante AS documento,
+          v.fecha,
+          COALESCE(c.nombre, 'Consumidor final') AS cliente_nombre,
+          v.total AS monto,
+          v.no_cobrado_motivo AS motivo,
+          ua.nombre AS autorizado_por_nombre,
+          ua.username AS autorizado_por_username
+        FROM "Venta" v
+        LEFT JOIN "Clientes" c ON c."Id_clientes" = v.id_cliente
+        LEFT JOIN "Usuario" ua ON ua.id_usuario = v.no_cobrado_autorizado_por
+        WHERE ${buildVentaCajaWhere("v")}
+          AND v.estado = 'NO_COBRADO'
+          AND v.no_cobrado_validado_en IS NULL
+        ORDER BY v.fecha DESC
+      `,
+      [
+        Number(id_caja_sesion),
+        Number(sesion.id_usuario),
+        Number(sesion.id_sucursal),
+        sesion.fecha_apertura,
+        fechaFin,
+      ]
+    ),
+    pool.query(
+      `
+        SELECT
+          'AUTOLAVADO' AS modulo,
+          ao.id_autolavado_orden::text AS referencia,
+          ao.placa AS documento,
+          ao.fecha,
+          COALESCE(ao.nombre_cliente, 'Consumidor final') AS cliente_nombre,
+          ao.monto_cobrado AS monto,
+          ao.no_cobrado_motivo AS motivo,
+          ua.nombre AS autorizado_por_nombre,
+          ua.username AS autorizado_por_username
+        FROM "Autolavado_orden" ao
+        LEFT JOIN "Usuario" ua ON ua.id_usuario = ao.no_cobrado_autorizado_por
+        WHERE ao.id_caja_sesion = $1
+          AND ao.estado = 'NO_COBRADO'
+          AND ao.no_cobrado_validado_en IS NULL
+        ORDER BY ao.fecha DESC
+      `,
+      [Number(id_caja_sesion)]
+    ),
+    pool.query(
+      `
+        SELECT
+          'REPARACION' AS modulo,
+          ro.id_reparacion_orden::text AS referencia,
+          ro.placa AS documento,
+          ro.fecha,
+          COALESCE(ro.nombre_cliente, 'Consumidor final') AS cliente_nombre,
+          ro.monto_cobrado AS monto,
+          ro.no_cobrado_motivo AS motivo,
+          ua.nombre AS autorizado_por_nombre,
+          ua.username AS autorizado_por_username
+        FROM "Reparacion_orden" ro
+        LEFT JOIN "Usuario" ua ON ua.id_usuario = ro.no_cobrado_autorizado_por
+        WHERE ro.id_caja_sesion = $1
+          AND ro.estado = 'NO_COBRADO'
+          AND ro.no_cobrado_validado_en IS NULL
+        ORDER BY ro.fecha DESC
+      `,
+      [Number(id_caja_sesion)]
+    ),
+  ]);
+
+  return [
+    ...ventasResult.rows,
+    ...autolavadoResult.rows,
+    ...reparacionesResult.rows,
+  ].sort((a, b) => new Date(b.fecha).getTime() - new Date(a.fecha).getTime());
+};
+
+const getNoCobrosValidadosCaja = async (id_caja_sesion, sesion, fechaFin) => {
+  const [ventasResult, autolavadoResult, reparacionesResult] = await Promise.all([
+    pool.query(
+      `
+        SELECT
+          'VENTA' AS modulo,
+          v.id_venta::text AS referencia,
+          v.numero_comprobante AS documento,
+          v.no_cobrado_validado_en AS fecha_validacion,
+          v.no_cobrado_validacion_nota AS nota_validacion,
+          ua.nombre AS admin_nombre,
+          ua.username AS admin_username
+        FROM "Venta" v
+        LEFT JOIN "Usuario" ua ON ua.id_usuario = v.no_cobrado_validado_por
+        WHERE ${buildVentaCajaWhere("v")}
+          AND v.estado = 'NO_COBRADO'
+          AND v.no_cobrado_validado_en IS NOT NULL
+        ORDER BY v.no_cobrado_validado_en DESC
+      `,
+      [
+        Number(id_caja_sesion),
+        Number(sesion.id_usuario),
+        Number(sesion.id_sucursal),
+        sesion.fecha_apertura,
+        fechaFin,
+      ]
+    ),
+    pool.query(
+      `
+        SELECT
+          'AUTOLAVADO' AS modulo,
+          ao.id_autolavado_orden::text AS referencia,
+          ao.placa AS documento,
+          ao.no_cobrado_validado_en AS fecha_validacion,
+          ao.no_cobrado_validacion_nota AS nota_validacion,
+          ua.nombre AS admin_nombre,
+          ua.username AS admin_username
+        FROM "Autolavado_orden" ao
+        LEFT JOIN "Usuario" ua ON ua.id_usuario = ao.no_cobrado_validado_por
+        WHERE ao.id_caja_sesion = $1
+          AND ao.estado = 'NO_COBRADO'
+          AND ao.no_cobrado_validado_en IS NOT NULL
+        ORDER BY ao.no_cobrado_validado_en DESC
+      `,
+      [Number(id_caja_sesion)]
+    ),
+    pool.query(
+      `
+        SELECT
+          'REPARACION' AS modulo,
+          ro.id_reparacion_orden::text AS referencia,
+          ro.placa AS documento,
+          ro.no_cobrado_validado_en AS fecha_validacion,
+          ro.no_cobrado_validacion_nota AS nota_validacion,
+          ua.nombre AS admin_nombre,
+          ua.username AS admin_username
+        FROM "Reparacion_orden" ro
+        LEFT JOIN "Usuario" ua ON ua.id_usuario = ro.no_cobrado_validado_por
+        WHERE ro.id_caja_sesion = $1
+          AND ro.estado = 'NO_COBRADO'
+          AND ro.no_cobrado_validado_en IS NOT NULL
+        ORDER BY ro.no_cobrado_validado_en DESC
+      `,
+      [Number(id_caja_sesion)]
+    ),
+  ]);
+
+  return [
+    ...ventasResult.rows,
+    ...autolavadoResult.rows,
+    ...reparacionesResult.rows,
+  ].sort(
+    (a, b) =>
+      new Date(b.fecha_validacion || 0).getTime() -
+      new Date(a.fecha_validacion || 0).getTime()
+  );
+};
+
 export const getCajaSesionActiva = async (id_usuario) => {
   const result = await pool.query(
     `
@@ -206,20 +378,19 @@ export const getCajaResumen = async (id_caja_sesion) => {
   const ventasResult = await pool.query(
     `
       SELECT
-        COUNT(*) FILTER (WHERE estado <> 'ANULADA')::int AS ventas_cantidad,
+        COUNT(*) FILTER (WHERE estado NOT IN ('ANULADA', 'NO_COBRADO'))::int AS ventas_cantidad,
         COUNT(*) FILTER (WHERE estado = 'ANULADA')::int AS ventas_anuladas,
-        COALESCE(SUM(total) FILTER (WHERE estado <> 'ANULADA'), 0) AS total_neto,
-        COALESCE(SUM(total) FILTER (WHERE estado <> 'ANULADA' AND metodo_pago = 'EFECTIVO'), 0) AS total_efectivo,
-        COALESCE(SUM(total) FILTER (WHERE estado <> 'ANULADA' AND metodo_pago = 'TARJETA'), 0) AS total_tarjeta,
-        COALESCE(SUM(total) FILTER (WHERE estado <> 'ANULADA' AND metodo_pago = 'TRANSFERENCIA'), 0) AS total_transferencia,
-        COALESCE(SUM(total) FILTER (WHERE estado <> 'ANULADA' AND tipo_venta = 'CREDITO'), 0) AS total_credito
-      FROM "Venta"
-      WHERE id_usuario = $1
-        AND id_sucursal = $2
-        AND fecha >= $3
-        AND fecha <= $4
+        COUNT(*) FILTER (WHERE estado = 'NO_COBRADO')::int AS ventas_no_cobradas,
+        COALESCE(SUM(total) FILTER (WHERE estado NOT IN ('ANULADA', 'NO_COBRADO')), 0) AS total_neto,
+        COALESCE(SUM(total) FILTER (WHERE estado NOT IN ('ANULADA', 'NO_COBRADO') AND metodo_pago = 'EFECTIVO'), 0) AS total_efectivo,
+        COALESCE(SUM(total) FILTER (WHERE estado NOT IN ('ANULADA', 'NO_COBRADO') AND metodo_pago = 'TARJETA'), 0) AS total_tarjeta,
+        COALESCE(SUM(total) FILTER (WHERE estado NOT IN ('ANULADA', 'NO_COBRADO') AND metodo_pago = 'TRANSFERENCIA'), 0) AS total_transferencia,
+        COALESCE(SUM(total) FILTER (WHERE estado NOT IN ('ANULADA', 'NO_COBRADO') AND tipo_venta = 'CREDITO'), 0) AS total_credito
+      FROM "Venta" v
+      WHERE ${buildVentaCajaWhere("v")}
     `,
     [
+      Number(id_caja_sesion),
       Number(sesion.id_usuario),
       Number(sesion.id_sucursal),
       sesion.fecha_apertura,
@@ -231,6 +402,7 @@ export const getCajaResumen = async (id_caja_sesion) => {
     `
       SELECT
         COUNT(*) FILTER (WHERE estado = 'PAGADO')::int AS servicios_cantidad,
+        COUNT(*) FILTER (WHERE estado = 'NO_COBRADO')::int AS servicios_no_cobrados,
         COALESCE(SUM(monto_cobrado) FILTER (WHERE estado = 'PAGADO'), 0) AS total_servicios,
         COALESCE(SUM(monto_cobrado) FILTER (WHERE estado = 'PAGADO' AND metodo_pago = 'EFECTIVO'), 0) AS total_servicios_efectivo,
         COALESCE(SUM(monto_cobrado) FILTER (WHERE estado = 'PAGADO' AND metodo_pago = 'TARJETA'), 0) AS total_servicios_tarjeta,
@@ -245,6 +417,7 @@ export const getCajaResumen = async (id_caja_sesion) => {
     `
       SELECT
         COUNT(*) FILTER (WHERE estado = 'PAGADO')::int AS reparaciones_cantidad,
+        COUNT(*) FILTER (WHERE estado = 'NO_COBRADO')::int AS reparaciones_no_cobradas,
         COALESCE(SUM(monto_cobrado) FILTER (WHERE estado = 'PAGADO'), 0) AS total_reparaciones,
         COALESCE(SUM(monto_cobrado) FILTER (WHERE estado = 'PAGADO' AND metodo_pago = 'EFECTIVO'), 0) AS total_reparaciones_efectivo,
         COALESCE(SUM(monto_cobrado) FILTER (WHERE estado = 'PAGADO' AND metodo_pago = 'TARJETA'), 0) AS total_reparaciones_tarjeta,
@@ -274,6 +447,16 @@ export const getCajaResumen = async (id_caja_sesion) => {
   const ventas = ventasResult.rows[0] || {};
   const servicios = serviciosResult.rows[0] || {};
   const reparaciones = reparacionesResult.rows[0] || {};
+  const noCobradosPendientes = await getNoCobrosPendientesCaja(
+    id_caja_sesion,
+    sesion,
+    fechaFin
+  );
+  const noCobradosValidados = await getNoCobrosValidadosCaja(
+    id_caja_sesion,
+    sesion,
+    fechaFin
+  );
 
   const montoApertura = toNumber(sesion.monto_apertura);
   const ingresos = toNumber(movimientos.ingresos);
@@ -319,6 +502,9 @@ export const getCajaResumen = async (id_caja_sesion) => {
       total_neto_ventas: toNumber(ventas.total_neto),
       ventas_cantidad: Number(ventas.ventas_cantidad || 0),
       ventas_anuladas: Number(ventas.ventas_anuladas || 0),
+      ventas_no_cobradas: Number(ventas.ventas_no_cobradas || 0),
+      servicios_no_cobrados: Number(servicios.servicios_no_cobrados || 0),
+      reparaciones_no_cobradas: Number(reparaciones.reparaciones_no_cobradas || 0),
       ingresos_manuales: ingresos,
       egresos_manuales: egresos,
       movimientos_manuales: Number(movimientos.movimientos || 0),
@@ -343,6 +529,23 @@ export const getCajaResumen = async (id_caja_sesion) => {
       cierre_calculado: cierreCalculado,
       monto_cierre_reportado: sesion.monto_cierre_reportado != null ? toNumber(sesion.monto_cierre_reportado) : null,
       diferencia: sesion.diferencia != null ? toNumber(sesion.diferencia) : null,
+      no_cobrados_pendientes_count: noCobradosPendientes.length,
+      no_cobrados_pendientes: noCobradosPendientes,
+      no_cobrados_validados_count: noCobradosValidados.length,
+      no_cobrados_validados: noCobradosValidados,
+      no_cobrados_validados_admins: Array.from(
+        new Map(
+          noCobradosValidados
+            .filter((item) => item.admin_nombre || item.admin_username)
+            .map((item) => [
+              item.admin_username || item.admin_nombre,
+              {
+                nombre: item.admin_nombre || item.admin_username,
+                username: item.admin_username || null,
+              },
+            ])
+        ).values()
+      ),
     },
     movimientos: await getCajaMovimientos(id_caja_sesion),
   };
@@ -404,6 +607,8 @@ export const cerrarCaja = async ({
   id_usuario,
   monto_cierre_reportado,
   observaciones_cierre,
+  validacion_no_cobro_admin_id = null,
+  validacion_no_cobro_nota = null,
 }) => {
   const sesion = await getCajaSesionById(id_caja_sesion);
   if (!sesion || sesion.estado !== "ABIERTA") {
@@ -415,7 +620,66 @@ export const cerrarCaja = async ({
     throw new Error("monto_cierre_reportado debe ser un numero mayor o igual a 0");
   }
 
-  const { resumen } = await getCajaResumen(id_caja_sesion);
+  const { resumen, sesion: sesionActual } = await getCajaResumen(id_caja_sesion);
+  if (
+    Number(resumen.no_cobrados_pendientes_count || 0) > 0 &&
+    !Number.isInteger(Number(validacion_no_cobro_admin_id || 0))
+  ) {
+    throw new Error("Debes validar con un administrador los registros no cobrados antes de cerrar caja");
+  }
+
+  if (Number(resumen.no_cobrados_pendientes_count || 0) > 0) {
+    const fechaFin = sesionActual.fecha_cierre || new Date().toISOString();
+    const paramsVenta = [
+      Number(validacion_no_cobro_admin_id),
+      validacion_no_cobro_nota || null,
+      Number(id_caja_sesion),
+      Number(sesion.id_usuario),
+      Number(sesion.id_sucursal),
+      sesion.fecha_apertura,
+      fechaFin,
+    ];
+
+    await Promise.all([
+      pool.query(
+        `
+          UPDATE "Venta" v
+          SET no_cobrado_validado_por = $1,
+              no_cobrado_validado_en = now(),
+              no_cobrado_validacion_nota = $2
+          WHERE ${buildVentaCajaWhere("v", 3)}
+            AND v.estado = 'NO_COBRADO'
+            AND v.no_cobrado_validado_en IS NULL
+        `,
+        paramsVenta
+      ),
+      pool.query(
+        `
+          UPDATE "Autolavado_orden"
+          SET no_cobrado_validado_por = $1,
+              no_cobrado_validado_en = now(),
+              no_cobrado_validacion_nota = $2
+          WHERE id_caja_sesion = $3
+            AND estado = 'NO_COBRADO'
+            AND no_cobrado_validado_en IS NULL
+        `,
+        [Number(validacion_no_cobro_admin_id), validacion_no_cobro_nota || null, Number(id_caja_sesion)]
+      ),
+      pool.query(
+        `
+          UPDATE "Reparacion_orden"
+          SET no_cobrado_validado_por = $1,
+              no_cobrado_validado_en = now(),
+              no_cobrado_validacion_nota = $2
+          WHERE id_caja_sesion = $3
+            AND estado = 'NO_COBRADO'
+            AND no_cobrado_validado_en IS NULL
+        `,
+        [Number(validacion_no_cobro_admin_id), validacion_no_cobro_nota || null, Number(id_caja_sesion)]
+      ),
+    ]);
+  }
+
   const diferencia = toNumber(montoReportado - resumen.cierre_calculado);
 
   const result = await pool.query(

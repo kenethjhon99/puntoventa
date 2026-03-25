@@ -64,6 +64,8 @@ export const crearVenta = async (req, res) => {
       id_cliente,
       tipo_comprobante,
       monto_recibido,
+      no_cobrar,
+      no_cobrado_motivo,
     } = req.body;
 
     if (!Array.isArray(items) || items.length === 0) {
@@ -77,14 +79,25 @@ export const crearVenta = async (req, res) => {
       });
     }
 
+    if (Boolean(no_cobrar)) {
+      const motivoNoCobro = String(no_cobrado_motivo || "").trim();
+      if (!motivoNoCobro) {
+        return res.status(400).json({ error: "Debes indicar el motivo del no cobro" });
+      }
+    }
+
     const venta = await Venta.crearVenta({
       id_usuario: req.user.id_usuario,
       id_sucursal: Number(id_sucursal || 1),
+      id_caja_sesion: Number(sesionCaja.id_caja_sesion),
       id_cliente: id_cliente ? Number(id_cliente) : null,
       tipo_venta,
       metodo_pago,
       tipo_comprobante,
       monto_recibido,
+      no_cobrar: Boolean(no_cobrar),
+      no_cobrado_motivo: String(no_cobrado_motivo || "").trim() || null,
+      no_cobrado_autorizado_por: null,
       items,
       id_bodega: 1
     });

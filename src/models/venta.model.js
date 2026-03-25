@@ -329,11 +329,15 @@ export const anularVentaCompleta = async ({
 export const crearVenta = async ({
   id_usuario,
   id_sucursal = 1,
+  id_caja_sesion = null,
   id_cliente = null,
   tipo_venta,
   metodo_pago,
   tipo_comprobante = TIPO_COMPROBANTE_DEFAULT,
   monto_recibido = null,
+  no_cobrar = false,
+  no_cobrado_motivo = null,
+  no_cobrado_autorizado_por = null,
   items,
   id_bodega = 1,
 }) => {
@@ -343,9 +347,13 @@ export const crearVenta = async ({
     await client.query("BEGIN");
 
     const comprobante = await emitirComprobanteVenta(client, tipo_comprobante);
+    const ventaSinCobro = Boolean(no_cobrar);
     const metodoPagoNormalizado = String(metodo_pago ?? "EFECTIVO")
       .trim()
       .toUpperCase();
+    const metodoPagoPersistido = ventaSinCobro
+      ? "NO_COBRADO"
+      : metodoPagoNormalizado;
     const montoRecibidoNormalizado =
       monto_recibido == null || monto_recibido === ""
         ? null
@@ -366,6 +374,7 @@ export const crearVenta = async ({
       metodo_pago,
       id_sucursal,
       id_usuario,
+      id_caja_sesion,
       id_cliente,
       estado,
       id_comprobante_serie,
@@ -374,27 +383,47 @@ export const crearVenta = async ({
       correlativo_comprobante,
       numero_comprobante,
       monto_recibido,
-      cambio_entregado
+      cambio_entregado,
+      no_cobrado_motivo,
+      no_cobrado_autorizado_por,
+      no_cobrado_autorizado_en,
+      no_cobrado_validado_por,
+      no_cobrado_validado_en,
+      no_cobrado_validacion_nota
     )
-   VALUES (now(), 0, $1, $2, $3, $4, $5, 'COMPLETADA', $6, $7, $8, $9, $10, NULL, 0)
+   VALUES (
+      now(), 0, $1, $2, $3, $4, $5, $6, $7,
+      $8, $9, $10, $11, $12, NULL, 0,
+      $13, $14, CASE WHEN $15 THEN now() ELSE NULL END, NULL, NULL, NULL
+   )
    RETURNING id_venta,
             (fecha AT TIME ZONE 'America/Guatemala') AS fecha,
-            total, tipo_venta, metodo_pago, id_sucursal, id_usuario, id_cliente, estado,
+            total, tipo_venta, metodo_pago, id_sucursal, id_usuario, id_caja_sesion, id_cliente, estado,
             id_comprobante_serie, tipo_comprobante, serie_comprobante, correlativo_comprobante, numero_comprobante,
             monto_recibido, cambio_entregado,
             (anulada_en AT TIME ZONE 'America/Guatemala') AS anulada_en,
-            anulada_por, motivo_anulacion`,
+            anulada_por, motivo_anulacion,
+            no_cobrado_motivo, no_cobrado_autorizado_por,
+            (no_cobrado_autorizado_en AT TIME ZONE 'America/Guatemala') AS no_cobrado_autorizado_en,
+            no_cobrado_validado_por,
+            (no_cobrado_validado_en AT TIME ZONE 'America/Guatemala') AS no_cobrado_validado_en,
+            no_cobrado_validacion_nota`,
   [
     tipo_venta ?? "CONTADO",
-    metodoPagoNormalizado,
+    metodoPagoPersistido,
     id_sucursal,
     id_usuario,
+    id_caja_sesion,
     id_cliente,
+    ventaSinCobro ? "NO_COBRADO" : "COMPLETADA",
     comprobante.id_comprobante_serie,
     comprobante.tipo_comprobante,
     comprobante.serie_comprobante,
     comprobante.correlativo_comprobante,
     comprobante.numero_comprobante,
+    ventaSinCobro ? no_cobrado_motivo : null,
+    ventaSinCobro ? no_cobrado_autorizado_por : null,
+    ventaSinCobro,
   ]
 );
 
@@ -499,8 +528,12 @@ const nombreProd = rProd.rows[0].nombre;
       [
         Number(total.toFixed(2)),
         Number(utilidad_total.toFixed(2)),
-        montoRecibidoNormalizado != null ? Number(montoRecibidoNormalizado.toFixed(2)) : null,
-        metodoPagoNormalizado === "EFECTIVO" && montoRecibidoNormalizado != null
+        !ventaSinCobro && montoRecibidoNormalizado != null
+          ? Number(montoRecibidoNormalizado.toFixed(2))
+          : null,
+        !ventaSinCobro &&
+        metodoPagoNormalizado === "EFECTIVO" &&
+        montoRecibidoNormalizado != null
           ? Number(Math.max(0, montoRecibidoNormalizado - total).toFixed(2))
           : 0,
         venta.id_venta,

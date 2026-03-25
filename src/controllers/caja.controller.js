@@ -1,4 +1,5 @@
 import * as Caja from "../models/caja.model.js";
+import { authorizeAdminCredentials } from "../utils/adminAuthorization.js";
 
 const isAdmin = (req) => {
   const roles = Array.isArray(req.user?.roles) ? req.user.roles : [];
@@ -83,11 +84,24 @@ export const cerrarCaja = async (req, res) => {
       return res.status(403).json({ error: "No autorizado para cerrar esta caja" });
     }
 
+    const resumenActual = await Caja.getCajaResumen(Number(id_sesion));
+    let adminAuthorization = null;
+    if (Number(resumenActual?.resumen?.no_cobrados_pendientes_count || 0) > 0) {
+      adminAuthorization = await authorizeAdminCredentials({
+        username: req.body?.admin_username,
+        password: req.body?.admin_password,
+        actorId: req.user?.id_usuario ?? null,
+      });
+    }
+
     await Caja.cerrarCaja({
       id_caja_sesion: Number(id_sesion),
       id_usuario: req.user.id_usuario,
       monto_cierre_reportado: req.body?.monto_cierre_reportado,
       observaciones_cierre: req.body?.observaciones_cierre,
+      validacion_no_cobro_admin_id: adminAuthorization?.id_usuario ?? null,
+      validacion_no_cobro_nota:
+        String(req.body?.validacion_no_cobro_nota || "").trim() || null,
     });
 
     const data = await Caja.getCajaResumen(Number(id_sesion));

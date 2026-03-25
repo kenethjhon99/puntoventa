@@ -31,14 +31,14 @@ const router = Router();
 router.get(
   "/tecnicos",
   auth,
-  requireRole("SUPER_ADMIN", "ADMIN", "CAJERO"),
+  requireRole("SUPER_ADMIN", "ADMIN", "CAJERO", "MECANICO"),
   listarTecnicosAsignables
 );
 
 router.get(
   "/autolavado/catalogo",
   auth,
-  requireRole("SUPER_ADMIN", "ADMIN", "CAJERO"),
+  requireRole("SUPER_ADMIN", "ADMIN", "CAJERO", "MECANICO"),
   listarCatalogoAutolavado
 );
 router.post(
@@ -68,31 +68,31 @@ router.put(
 router.post(
   "/autolavado/cobros",
   auth,
-  requireRole("SUPER_ADMIN", "ADMIN", "CAJERO"),
+  requireRole("SUPER_ADMIN", "ADMIN", "CAJERO", "MECANICO"),
   cobrarServicioAutolavado
 );
 router.get(
   "/autolavado/ordenes",
   auth,
-  requireRole("SUPER_ADMIN", "ADMIN", "CAJERO"),
+  requireRole("SUPER_ADMIN", "ADMIN", "CAJERO", "MECANICO"),
   listarOrdenesAutolavado
 );
 router.patch(
   "/autolavado/ordenes/:id/estado",
   auth,
-  requireRole("SUPER_ADMIN", "ADMIN", "CAJERO"),
+  requireRole("SUPER_ADMIN", "ADMIN", "CAJERO", "MECANICO"),
   actualizarEstadoOrdenAutolavado
 );
 router.patch(
   "/autolavado/ordenes/:id/tecnico",
   auth,
-  requireRole("SUPER_ADMIN", "ADMIN", "CAJERO"),
+  requireRole("SUPER_ADMIN", "ADMIN", "CAJERO", "MECANICO"),
   asignarTecnicoOrdenAutolavado
 );
 router.get(
   "/reparacion/catalogo",
   auth,
-  requireRole("SUPER_ADMIN", "ADMIN", "CAJERO"),
+  requireRole("SUPER_ADMIN", "ADMIN", "CAJERO", "MECANICO"),
   listarCatalogoReparacion
 );
 router.post(
@@ -122,43 +122,43 @@ router.put(
 router.post(
   "/reparacion/cobros",
   auth,
-  requireRole("SUPER_ADMIN", "ADMIN", "CAJERO"),
+  requireRole("SUPER_ADMIN", "ADMIN", "CAJERO", "MECANICO"),
   cobrarServicioReparacion
 );
 router.post(
   "/reparacion/ordenes",
   auth,
-  requireRole("SUPER_ADMIN", "ADMIN", "CAJERO"),
+  requireRole("SUPER_ADMIN", "ADMIN", "CAJERO", "MECANICO"),
   crearOrdenReparacion
 );
 router.get(
   "/reparacion/ordenes",
   auth,
-  requireRole("SUPER_ADMIN", "ADMIN", "CAJERO"),
+  requireRole("SUPER_ADMIN", "ADMIN", "CAJERO", "MECANICO"),
   listarOrdenesReparacion
 );
 router.post(
   "/reparacion/ordenes/:id/cobro",
   auth,
-  requireRole("SUPER_ADMIN", "ADMIN", "CAJERO"),
+  requireRole("SUPER_ADMIN", "ADMIN", "CAJERO", "MECANICO"),
   cobrarOrdenReparacion
 );
 router.post(
   "/reparacion/ordenes/:id/productos",
   auth,
-  requireRole("SUPER_ADMIN", "ADMIN", "CAJERO"),
+  requireRole("SUPER_ADMIN", "ADMIN", "CAJERO", "MECANICO"),
   agregarProductoOrdenReparacion
 );
 router.patch(
   "/reparacion/ordenes/:id/estado",
   auth,
-  requireRole("SUPER_ADMIN", "ADMIN", "CAJERO"),
+  requireRole("SUPER_ADMIN", "ADMIN", "CAJERO", "MECANICO"),
   actualizarEstadoOrdenReparacion
 );
 router.patch(
   "/reparacion/ordenes/:id/tecnico",
   auth,
-  requireRole("SUPER_ADMIN", "ADMIN", "CAJERO"),
+  requireRole("SUPER_ADMIN", "ADMIN", "CAJERO", "MECANICO"),
   asignarTecnicoOrdenReparacion
 );
 
