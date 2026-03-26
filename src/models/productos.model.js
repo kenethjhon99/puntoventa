@@ -1,6 +1,18 @@
 import { pool } from "../config/db.js";
 
-export const getProductos = async () => {
+export const getProductos = async ({ scope = "GENERAL" } = {}) => {
+  const normalizedScope = String(scope || "GENERAL").trim().toUpperCase();
+  const params = [];
+  let scopeWhere = "";
+
+  if (normalizedScope === "SERVICIOS") {
+    scopeWhere = `AND COALESCE(p.modulo_origen, 'GENERAL') = $1`;
+    params.push("SERVICIOS");
+  } else if (normalizedScope === "GENERAL") {
+    scopeWhere = `AND COALESCE(p.modulo_origen, 'GENERAL') = $1`;
+    params.push("GENERAL");
+  }
+
   const result = await pool.query(`
     SELECT
       p.*,
@@ -13,8 +25,9 @@ export const getProductos = async () => {
       ON s.id_producto = p.id_producto
      AND s.id_bodega = 1
     WHERE COALESCE(p.activo, true) = true
+      ${scopeWhere}
     ORDER BY p.nombre ASC
-  `);
+  `, params);
 
   return result.rows;
 };
@@ -44,6 +57,7 @@ export const createProductoConStock = async ({
   descripcion,
   precio_compra,
   precio_venta,
+  modulo_origen = "GENERAL",
   existencia_inicial = 0,
   stock_minimo = 0,
   ubicacion = null,
@@ -57,8 +71,16 @@ export const createProductoConStock = async ({
 
     // 1) Insert Producto
     const prod = await client.query(
-      'INSERT INTO "Producto" (codigo_barras, nombre, descripcion, precio_compra, precio_venta, activo, created_by, updated_by) VALUES ($1,$2,$3,$4,$5,true,$6,$6) RETURNING "id_producto"',
-      [codigo_barras, nombre, descripcion, precio_compra, precio_venta, id_usuario]
+      'INSERT INTO "Producto" (codigo_barras, nombre, descripcion, precio_compra, precio_venta, modulo_origen, activo, created_by, updated_by) VALUES ($1,$2,$3,$4,$5,$6,true,$7,$7) RETURNING "id_producto"',
+      [
+        codigo_barras,
+        nombre,
+        descripcion,
+        precio_compra,
+        precio_venta,
+        String(modulo_origen || "GENERAL").trim().toUpperCase(),
+        id_usuario,
+      ]
     );
 
     const id_producto = prod.rows[0].id_producto;

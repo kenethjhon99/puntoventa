@@ -2,9 +2,36 @@ import * as Producto from "../models/productos.model.js";
 import * as Stock from "../models/stock.model.js";
 import { validateProductoUpdate } from "../validators/producto.validator.js";
 
+const getNormalizedRoles = (req) =>
+  (Array.isArray(req.user?.roles) ? req.user.roles : [])
+    .map((role) => String(role).trim().toUpperCase())
+    .filter(Boolean);
+
+const canAccessScope = (req, scope) => {
+  const roles = getNormalizedRoles(req);
+  const normalizedScope = String(scope || "GENERAL").trim().toUpperCase();
+
+  if (normalizedScope === "SERVICIOS") {
+    return roles.some((role) =>
+      ["SUPER_ADMIN", "ADMIN", "CAJERO", "MECANICO"].includes(role)
+    );
+  }
+
+  if (normalizedScope === "ALL") {
+    return roles.some((role) => ["SUPER_ADMIN", "ADMIN"].includes(role));
+  }
+
+  return roles.some((role) => ["SUPER_ADMIN", "ADMIN", "CAJERO"].includes(role));
+};
+
 export const listarProductos = async (req, res) => {
   try {
-    const productos = await Producto.getProductos();
+    const scope = String(req.query?.scope || "GENERAL").trim().toUpperCase();
+    if (!canAccessScope(req, scope)) {
+      return res.status(403).json({ error: "No autorizado para consultar este catalogo" });
+    }
+
+    const productos = await Producto.getProductos({ scope });
     res.json(productos);
   } catch (error) {
     res.status(500).json({ error: error.message });
@@ -19,6 +46,7 @@ export const crearProducto = async (req, res) => {
       descripcion,
       precio_compra,
       precio_venta,
+      modulo_origen,
       existencia_inicial,
       stock_minimo,
       ubicacion
@@ -30,6 +58,7 @@ export const crearProducto = async (req, res) => {
       descripcion,
       precio_compra,
       precio_venta,
+      modulo_origen: String(modulo_origen || "GENERAL").trim().toUpperCase(),
       existencia_inicial: Number(existencia_inicial || 0),
       stock_minimo: Number(stock_minimo || 0),
       ubicacion: ubicacion ?? null,
@@ -60,6 +89,12 @@ export const actualizarProducto = async (req, res) => {
       ubicacion,
       ...datosProducto
     } = req.body;
+
+    if (datosProducto.modulo_origen !== undefined) {
+      datosProducto.modulo_origen = String(datosProducto.modulo_origen || "GENERAL")
+        .trim()
+        .toUpperCase();
+    }
 
     if (
       existencia_inicial !== undefined &&

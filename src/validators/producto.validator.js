@@ -1,4 +1,6 @@
-const isNumber = (v) => typeof v === "number" && Number.isFinite(v);
+const isNumber = (value) => typeof value === "number" && Number.isFinite(value);
+
+const isValidModuloOrigen = (value) => ["GENERAL", "SERVICIOS"].includes(value);
 
 export const validateProductoCreate = (body) => {
   const errors = [];
@@ -6,14 +8,14 @@ export const validateProductoCreate = (body) => {
 
   if (body.codigo_barras !== undefined) {
     if (typeof body.codigo_barras !== "string" || body.codigo_barras.trim() === "") {
-      errors.push("codigo_barras debe ser string no vacío");
+      errors.push("codigo_barras debe ser string no vacio");
     } else {
       data.codigo_barras = body.codigo_barras.trim();
     }
   }
 
   if (typeof body.nombre !== "string" || body.nombre.trim().length < 2) {
-    errors.push("nombre es requerido (mínimo 2 caracteres)");
+    errors.push("nombre es requerido (minimo 2 caracteres)");
   } else {
     data.nombre = body.nombre.trim();
   }
@@ -27,13 +29,13 @@ export const validateProductoCreate = (body) => {
   }
 
   if (!isNumber(body.precio_compra) || body.precio_compra < 0) {
-    errors.push("precio_compra es requerido y debe ser número >= 0");
+    errors.push("precio_compra es requerido y debe ser numero >= 0");
   } else {
     data.precio_compra = body.precio_compra;
   }
 
   if (!isNumber(body.precio_venta) || body.precio_venta < 0) {
-    errors.push("precio_venta es requerido y debe ser número >= 0");
+    errors.push("precio_venta es requerido y debe ser numero >= 0");
   } else {
     data.precio_venta = body.precio_venta;
   }
@@ -44,6 +46,15 @@ export const validateProductoCreate = (body) => {
     body.precio_venta < body.precio_compra
   ) {
     errors.push("precio_venta no puede ser menor que precio_compra");
+  }
+
+  if (body.modulo_origen !== undefined) {
+    const moduloOrigen = String(body.modulo_origen || "").trim().toUpperCase();
+    if (!isValidModuloOrigen(moduloOrigen)) {
+      errors.push("modulo_origen debe ser GENERAL o SERVICIOS");
+    } else {
+      data.modulo_origen = moduloOrigen;
+    }
   }
 
   if (body.stock_minimo !== undefined) {
@@ -72,6 +83,7 @@ export const validateProductoUpdate = (body) => {
     "descripcion",
     "precio_compra",
     "precio_venta",
+    "modulo_origen",
     "stock_minimo",
     "ubicacion",
   ];
@@ -89,7 +101,7 @@ export const validateProductoUpdate = (body) => {
 
   if (body.codigo_barras !== undefined) {
     if (typeof body.codigo_barras !== "string" || body.codigo_barras.trim() === "") {
-      errors.push("codigo_barras debe ser string no vacío");
+      errors.push("codigo_barras debe ser string no vacio");
     } else {
       data.codigo_barras = body.codigo_barras.trim();
     }
@@ -97,7 +109,7 @@ export const validateProductoUpdate = (body) => {
 
   if (body.nombre !== undefined) {
     if (typeof body.nombre !== "string" || body.nombre.trim().length < 2) {
-      errors.push("nombre debe tener mínimo 2 caracteres");
+      errors.push("nombre debe tener minimo 2 caracteres");
     } else {
       data.nombre = body.nombre.trim();
     }
@@ -113,7 +125,7 @@ export const validateProductoUpdate = (body) => {
 
   if (body.precio_compra !== undefined) {
     if (!isNumber(body.precio_compra) || body.precio_compra < 0) {
-      errors.push("precio_compra debe ser número >= 0");
+      errors.push("precio_compra debe ser numero >= 0");
     } else {
       data.precio_compra = body.precio_compra;
     }
@@ -121,9 +133,18 @@ export const validateProductoUpdate = (body) => {
 
   if (body.precio_venta !== undefined) {
     if (!isNumber(body.precio_venta) || body.precio_venta < 0) {
-      errors.push("precio_venta debe ser número >= 0");
+      errors.push("precio_venta debe ser numero >= 0");
     } else {
       data.precio_venta = body.precio_venta;
+    }
+  }
+
+  if (body.modulo_origen !== undefined) {
+    const moduloOrigen = String(body.modulo_origen || "").trim().toUpperCase();
+    if (!isValidModuloOrigen(moduloOrigen)) {
+      errors.push("modulo_origen debe ser GENERAL o SERVICIOS");
+    } else {
+      data.modulo_origen = moduloOrigen;
     }
   }
 

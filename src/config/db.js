@@ -286,6 +286,18 @@ export async function ensureSchema() {
   `);
 
   await pool.query(`
+    ALTER TABLE "Producto"
+    ADD COLUMN IF NOT EXISTS modulo_origen character varying(20) NOT NULL DEFAULT 'GENERAL'
+  `);
+
+  await pool.query(`
+    UPDATE "Producto"
+    SET modulo_origen = 'GENERAL'
+    WHERE modulo_origen IS NULL
+       OR BTRIM(modulo_origen) = ''
+  `);
+
+  await pool.query(`
     CREATE UNIQUE INDEX IF NOT EXISTS "clientes_nit_unique"
     ON "Clientes" (nit)
     WHERE nit IS NOT NULL
