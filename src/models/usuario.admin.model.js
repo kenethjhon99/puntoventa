@@ -1,5 +1,10 @@
 import { pool } from "../config/db.js";
 
+const normalizeActorId = (actorId) => {
+  const numericActorId = Number(actorId);
+  return Number.isInteger(numericActorId) ? numericActorId : null;
+};
+
 export const listarUsuarios = async () => {
   const r = await pool.query(`
     SELECT
@@ -36,6 +41,7 @@ export const getUsuarioById = async (id_usuario) => {
 };
 
 export const actualizarUsuarioBasico = async (id_usuario, { username, nombre }, actorId = null) => {
+  const normalizedActorId = normalizeActorId(actorId);
   const r = await pool.query(
     `UPDATE "Usuario"
      SET username = COALESCE($1, username),
@@ -43,24 +49,26 @@ export const actualizarUsuarioBasico = async (id_usuario, { username, nombre }, 
          updated_by = $3
      WHERE id_usuario = $4
      RETURNING id_usuario, username, nombre, activo, created_at, updated_at`,
-    [username ?? null, nombre ?? null, actorId, id_usuario]
+    [username ?? null, nombre ?? null, normalizedActorId, id_usuario]
   );
   return r.rows[0];
 };
 
 export const actualizarPasswordHashUsuario = async (id_usuario, password_hash, actorId = null) => {
+  const normalizedActorId = normalizeActorId(actorId);
   const r = await pool.query(
     `UPDATE "Usuario"
      SET password_hash = $1,
          updated_by = $3
      WHERE id_usuario = $2
      RETURNING id_usuario, username, nombre, activo, created_at, updated_at`,
-    [password_hash, id_usuario, actorId]
+    [password_hash, id_usuario, normalizedActorId]
   );
   return r.rows[0];
 };
 
 export const actualizarPersona = async (id_usuario, data, actorId = null) => {
+  const normalizedActorId = normalizeActorId(actorId);
   const fields = [];
   const values = [];
   let i = 1;
@@ -72,7 +80,7 @@ export const actualizarPersona = async (id_usuario, data, actorId = null) => {
   }
 
   fields.push(`updated_by = $${i}`);
-  values.push(actorId);
+  values.push(normalizedActorId);
   i++;
 
   const r = await pool.query(
@@ -87,6 +95,7 @@ export const actualizarPersona = async (id_usuario, data, actorId = null) => {
 };
 
 export const setActivoUsuario = async (id_usuario, activo, actorId = null) => {
+  const normalizedActorId = normalizeActorId(actorId);
   const r = await pool.query(
     `UPDATE "Usuario"
      SET activo = $1,
@@ -95,12 +104,13 @@ export const setActivoUsuario = async (id_usuario, activo, actorId = null) => {
          updated_by = $3
      WHERE id_usuario = $2
      RETURNING id_usuario, username, nombre, activo, created_at, updated_at, inactivado_en, inactivado_por`,
-    [activo, id_usuario, actorId]
+    [activo, id_usuario, normalizedActorId]
   );
   return r.rows[0];
 };
 
 export const asignarRol = async (id_usuario, id_rol, actorId = null) => {
+  const normalizedActorId = normalizeActorId(actorId);
   const existing = await pool.query(
     `SELECT id_usuario, id_rol, COALESCE(activo, true) AS activo
      FROM "Detalle_usuario"
@@ -122,7 +132,7 @@ export const asignarRol = async (id_usuario, id_rol, actorId = null) => {
            updated_by = $3
        WHERE id_usuario = $1 AND id_rol = $2
        RETURNING id_usuario, id_rol`,
-      [id_usuario, id_rol, actorId]
+      [id_usuario, id_rol, normalizedActorId]
     );
 
     return reactivated.rows[0];
@@ -132,12 +142,13 @@ export const asignarRol = async (id_usuario, id_rol, actorId = null) => {
     `INSERT INTO "Detalle_usuario" (id_usuario, id_rol, activo, created_by, updated_by)
      VALUES ($1, $2, true, $3, $3)
      RETURNING id_usuario, id_rol`,
-    [id_usuario, id_rol, actorId]
+    [id_usuario, id_rol, normalizedActorId]
   );
   return r.rows[0];
 };
 
 export const quitarRol = async (id_usuario, id_rol, actorId = null) => {
+  const normalizedActorId = normalizeActorId(actorId);
   const r = await pool.query(
     `UPDATE "Detalle_usuario"
      SET activo = false,
@@ -148,7 +159,7 @@ export const quitarRol = async (id_usuario, id_rol, actorId = null) => {
        AND id_rol = $2
        AND COALESCE(activo, true) = true
      RETURNING id_usuario, id_rol`,
-    [id_usuario, id_rol, actorId]
+    [id_usuario, id_rol, normalizedActorId]
   );
   return r.rows[0];
 };
