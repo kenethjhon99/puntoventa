@@ -505,6 +505,7 @@ export const registrarCobroAutolavado = async ({
   color = null,
   observaciones = null,
   metodoPago,
+  precioServicio = null,
   montoCobrado,
   montoRecibido = null,
   noCobrar = false,
@@ -550,6 +551,7 @@ export const registrarCobroAutolavado = async ({
         sc.id_servicio_catalogo,
         sc.id_tipo_vehiculo,
         sc.nombre,
+        sc.slug,
         sc.precio_base,
         stv.nombre AS tipo_vehiculo_nombre
       FROM "Servicio_catalogo" sc
@@ -568,6 +570,15 @@ export const registrarCobroAutolavado = async ({
   const servicio = servicioResult.rows[0];
   if (!servicio) {
     throw new Error("Servicio de autolavado no encontrado");
+  }
+
+  const precioServicioPersistido =
+    String(servicio.slug || "").trim().toLowerCase() === "otro"
+      ? Number(precioServicio)
+      : Number(servicio.precio_base || 0);
+
+  if (!Number.isFinite(precioServicioPersistido) || precioServicioPersistido <= 0) {
+    throw new Error("Debes indicar un precio valido para el servicio");
   }
 
   const vuelto =
@@ -643,7 +654,7 @@ export const registrarCobroAutolavado = async ({
       color || null,
       observaciones || null,
       metodoPagoPersistido,
-      Number(servicio.precio_base || 0),
+      precioServicioPersistido,
       montoCobradoNormalizado,
       ventaSinCobro ? null : montoRecibidoNormalizado,
       vuelto,
@@ -674,6 +685,7 @@ export const registrarCobroReparacion = async ({
   diagnosticoInicial = null,
   observaciones = null,
   metodoPago,
+  precioServicio = null,
   montoCobrado,
   montoRecibido = null,
   productos = [],
@@ -718,6 +730,7 @@ export const registrarCobroReparacion = async ({
         sc.id_servicio_catalogo,
         sc.id_tipo_vehiculo,
         sc.nombre,
+        sc.slug,
         sc.precio_base,
         stv.nombre AS tipo_vehiculo_nombre
       FROM "Servicio_catalogo" sc
@@ -736,6 +749,15 @@ export const registrarCobroReparacion = async ({
   const servicio = servicioResult.rows[0];
   if (!servicio) {
     throw new Error("Servicio de reparacion no encontrado");
+  }
+
+  const precioServicioPersistido =
+    String(servicio.slug || "").trim().toLowerCase() === "otro"
+      ? Number(precioServicio)
+      : Number(servicio.precio_base || 0);
+
+  if (!Number.isFinite(precioServicioPersistido) || precioServicioPersistido <= 0) {
+    throw new Error("Debes indicar un precio valido para el servicio");
   }
 
   const client = await pool.connect();
@@ -807,7 +829,7 @@ export const registrarCobroReparacion = async ({
     }
 
     const totalCalculado = Number(
-      (Number(servicio.precio_base || 0) + totalProductosCobrados).toFixed(2)
+      (precioServicioPersistido + totalProductosCobrados).toFixed(2)
     );
 
     if (montoCobradoNormalizado < totalCalculado) {
@@ -904,7 +926,7 @@ export const registrarCobroReparacion = async ({
         diagnosticoInicial || null,
         observaciones || null,
         metodoPagoPersistido,
-        Number(servicio.precio_base || 0),
+        precioServicioPersistido,
         totalCalculado,
         ventaSinCobro ? null : montoRecibidoNormalizado,
         vuelto,

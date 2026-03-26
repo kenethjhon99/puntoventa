@@ -887,16 +887,20 @@ export async function ensureSchema() {
         ('AUTOLAVADO', 'moto', 'Solo lavado', 'solo-lavado', 'Lavado exterior agil para motocicletas.', 20.00, 20, 'cleaning_services', 1),
         ('AUTOLAVADO', 'moto', 'Lavado y brillo', 'lavado-y-brillo', 'Lavado con acabado brillante para motocicletas.', 30.00, 30, 'auto_awesome', 2),
         ('AUTOLAVADO', 'moto', 'Lavado completo', 'lavado-completo', 'Lavado detallado de motocicleta con llantas y asiento.', 40.00, 40, 'workspace_premium', 3),
+        ('AUTOLAVADO', 'moto', 'Otro', 'otro', 'Servicio personalizado con precio variable para motocicleta.', 0.00, 20, 'auto_awesome', 4),
         ('AUTOLAVADO', 'carro', 'Solo lavado', 'solo-lavado', 'Lavado exterior rapido para carro.', 35.00, 25, 'cleaning_services', 1),
         ('AUTOLAVADO', 'carro', 'Lavado y aspirado', 'lavado-y-aspirado', 'Lavado exterior con aspirado basico de interior.', 50.00, 40, 'airline_seat_recline_extra', 2),
         ('AUTOLAVADO', 'carro', 'Lavado completo', 'lavado-completo', 'Lavado, aspirado y detalles basicos del vehiculo.', 75.00, 60, 'workspace_premium', 3),
         ('AUTOLAVADO', 'carro', 'Lavado premium', 'lavado-premium', 'Servicio completo con acabado y brillo final.', 95.00, 75, 'auto_awesome', 4),
+        ('AUTOLAVADO', 'carro', 'Otro', 'otro', 'Servicio personalizado con precio variable para carro.', 0.00, 30, 'auto_awesome', 5),
         ('AUTOLAVADO', 'pickup', 'Solo lavado', 'solo-lavado', 'Lavado exterior para pickup.', 45.00, 30, 'cleaning_services', 1),
         ('AUTOLAVADO', 'pickup', 'Lavado y aspirado', 'lavado-y-aspirado', 'Lavado exterior con limpieza de cabina.', 65.00, 45, 'airline_seat_recline_extra', 2),
         ('AUTOLAVADO', 'pickup', 'Lavado completo', 'lavado-completo', 'Servicio completo para pickup con detalles generales.', 90.00, 65, 'workspace_premium', 3),
+        ('AUTOLAVADO', 'pickup', 'Otro', 'otro', 'Servicio personalizado con precio variable para pickup.', 0.00, 30, 'auto_awesome', 4),
         ('AUTOLAVADO', 'camion', 'Lavado basico', 'lavado-basico', 'Lavado exterior basico para camion.', 80.00, 45, 'cleaning_services', 1),
         ('AUTOLAVADO', 'camion', 'Lavado y cabina', 'lavado-y-cabina', 'Lavado exterior con limpieza de cabina.', 110.00, 70, 'airline_seat_recline_extra', 2),
-        ('AUTOLAVADO', 'camion', 'Lavado completo', 'lavado-completo', 'Servicio completo con cabina, rines y acabados.', 140.00, 90, 'workspace_premium', 3)
+        ('AUTOLAVADO', 'camion', 'Lavado completo', 'lavado-completo', 'Servicio completo con cabina, rines y acabados.', 140.00, 90, 'workspace_premium', 3),
+        ('AUTOLAVADO', 'camion', 'Otro', 'otro', 'Servicio personalizado con precio variable para camion.', 0.00, 45, 'auto_awesome', 4)
     ) AS data(modulo, tipo_slug, nombre, slug, descripcion, precio_base, duracion_minutos, icono, orden)
     INNER JOIN "Servicio_tipo_vehiculo" stv
       ON stv.modulo = data.modulo
@@ -938,22 +942,28 @@ export async function ensureSchema() {
         ('REPARACION', 'moto', 'Diagnostico general', 'diagnostico-general', 'Revision general de motocicleta para detectar fallas mecanicas.', 35.00, 30, 'build', 1),
         ('REPARACION', 'moto', 'Cambio de aceite', 'cambio-de-aceite', 'Cambio de aceite y revision basica para motocicleta.', 55.00, 35, 'oil_barrel', 2),
         ('REPARACION', 'moto', 'Revision de frenos', 'revision-de-frenos', 'Inspeccion y ajuste de sistema de frenos.', 65.00, 45, 'car_repair', 3),
+        ('REPARACION', 'moto', 'Otro', 'otro', 'Trabajo mecanico personalizado con precio variable para motocicleta.', 0.00, 30, 'build', 4),
         ('REPARACION', 'sedan', 'Diagnostico general', 'diagnostico-general', 'Revision mecanica y electronica inicial del vehiculo.', 75.00, 45, 'build', 1),
         ('REPARACION', 'sedan', 'Cambio de aceite', 'cambio-de-aceite', 'Cambio de aceite, filtro y revision rapida.', 120.00, 40, 'oil_barrel', 2),
         ('REPARACION', 'sedan', 'Servicio de frenos', 'servicio-de-frenos', 'Revision, limpieza y ajuste del sistema de frenos.', 185.00, 70, 'car_repair', 3),
         ('REPARACION', 'sedan', 'Afinacion', 'afinacion', 'Afinacion general con revision de bujias y filtros.', 240.00, 90, 'tune', 4),
+        ('REPARACION', 'sedan', 'Otro', 'otro', 'Trabajo mecanico personalizado con precio variable para sedan.', 0.00, 45, 'build', 5),
         ('REPARACION', 'suv', 'Diagnostico general', 'diagnostico-general', 'Revision integral para SUV y camionetas.', 90.00, 50, 'build', 1),
         ('REPARACION', 'suv', 'Cambio de aceite', 'cambio-de-aceite', 'Cambio de aceite y chequeo de fluidos.', 145.00, 45, 'oil_barrel', 2),
         ('REPARACION', 'suv', 'Suspension y direccion', 'suspension-y-direccion', 'Revision de suspension, direccion y holguras.', 260.00, 110, 'settings', 3),
+        ('REPARACION', 'suv', 'Otro', 'otro', 'Trabajo mecanico personalizado con precio variable para SUV.', 0.00, 50, 'build', 4),
         ('REPARACION', 'pickup', 'Diagnostico general', 'diagnostico-general', 'Revision de motor, tren delantero y sistema electrico.', 95.00, 55, 'build', 1),
         ('REPARACION', 'pickup', 'Servicio de clutch', 'servicio-de-clutch', 'Evaluacion y ajuste del sistema de clutch.', 320.00, 150, 'settings', 2),
         ('REPARACION', 'pickup', 'Sistema electrico', 'sistema-electrico', 'Revision de alternador, bateria y cableado.', 210.00, 100, 'electrical_services', 3),
+        ('REPARACION', 'pickup', 'Otro', 'otro', 'Trabajo mecanico personalizado con precio variable para pickup.', 0.00, 55, 'build', 4),
         ('REPARACION', 'camion', 'Diagnostico general', 'diagnostico-general', 'Inspeccion general para vehiculos pesados.', 150.00, 70, 'build', 1),
         ('REPARACION', 'camion', 'Servicio de frenos', 'servicio-de-frenos', 'Revision del sistema de frenos para camion.', 380.00, 150, 'car_repair', 2),
         ('REPARACION', 'camion', 'Sistema electrico', 'sistema-electrico', 'Diagnostico de sistema electrico y arranque.', 340.00, 140, 'electrical_services', 3),
+        ('REPARACION', 'camion', 'Otro', 'otro', 'Trabajo mecanico personalizado con precio variable para camion.', 0.00, 70, 'build', 4),
         ('REPARACION', 'microbus', 'Diagnostico general', 'diagnostico-general', 'Chequeo completo para transporte liviano.', 110.00, 60, 'build', 1),
         ('REPARACION', 'microbus', 'Afinacion', 'afinacion', 'Afinacion con pruebas operativas y revision de inyeccion.', 280.00, 110, 'tune', 2),
-        ('REPARACION', 'microbus', 'Suspension y direccion', 'suspension-y-direccion', 'Revision de suspension, bujes y direccion.', 330.00, 140, 'settings', 3)
+        ('REPARACION', 'microbus', 'Suspension y direccion', 'suspension-y-direccion', 'Revision de suspension, bujes y direccion.', 330.00, 140, 'settings', 3),
+        ('REPARACION', 'microbus', 'Otro', 'otro', 'Trabajo mecanico personalizado con precio variable para microbus.', 0.00, 60, 'build', 4)
     ) AS data(modulo, tipo_slug, nombre, slug, descripcion, precio_base, duracion_minutos, icono, orden)
     INNER JOIN "Servicio_tipo_vehiculo" stv
       ON stv.modulo = data.modulo

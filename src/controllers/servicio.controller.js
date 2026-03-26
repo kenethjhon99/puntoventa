@@ -23,6 +23,10 @@ const normalizeCobroPayload = (body = {}) => ({
   color: String(body.color || "").trim() || null,
   observaciones: String(body.observaciones || "").trim() || null,
   metodoPago: String(body.metodo_pago || "EFECTIVO").trim() || "EFECTIVO",
+  precioServicio:
+    body.precio_servicio == null || body.precio_servicio === ""
+      ? null
+      : Number(body.precio_servicio),
   montoCobrado: Number(body.monto_cobrado),
   montoRecibido:
     body.monto_recibido == null || body.monto_recibido === ""
