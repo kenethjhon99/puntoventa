@@ -1269,6 +1269,32 @@ export async function ensureSchema() {
   `);
 
   await pool.query(`
+    WITH canonical_roles AS (
+      SELECT
+        MIN(id_rol) AS canonical_id_rol,
+        CASE
+          WHEN UPPER(TRIM(nombre_rol)) = 'SUPERADMIN' THEN 'SUPER_ADMIN'
+          ELSE UPPER(TRIM(nombre_rol))
+        END AS normalized_name
+      FROM "Rol"
+      GROUP BY CASE
+        WHEN UPPER(TRIM(nombre_rol)) = 'SUPERADMIN' THEN 'SUPER_ADMIN'
+        ELSE UPPER(TRIM(nombre_rol))
+      END
+    )
+    UPDATE "Detalle_usuario" du
+    SET id_rol = cr.canonical_id_rol
+    FROM "Rol" r
+    INNER JOIN canonical_roles cr
+      ON cr.normalized_name = CASE
+        WHEN UPPER(TRIM(r.nombre_rol)) = 'SUPERADMIN' THEN 'SUPER_ADMIN'
+        ELSE UPPER(TRIM(r.nombre_rol))
+      END
+    WHERE du.id_rol = r.id_rol
+      AND du.id_rol <> cr.canonical_id_rol
+  `);
+
+  await pool.query(`
     WITH ranked AS (
       SELECT
         ctid,
@@ -1289,8 +1315,45 @@ export async function ensureSchema() {
   `);
 
   await pool.query(`
+    WITH canonical_roles AS (
+      SELECT
+        MIN(id_rol) AS canonical_id_rol,
+        CASE
+          WHEN UPPER(TRIM(nombre_rol)) = 'SUPERADMIN' THEN 'SUPER_ADMIN'
+          ELSE UPPER(TRIM(nombre_rol))
+        END AS normalized_name
+      FROM "Rol"
+      GROUP BY CASE
+        WHEN UPPER(TRIM(nombre_rol)) = 'SUPERADMIN' THEN 'SUPER_ADMIN'
+        ELSE UPPER(TRIM(nombre_rol))
+      END
+    )
+    DELETE FROM "Rol" r
+    USING canonical_roles cr
+    WHERE (
+      CASE
+        WHEN UPPER(TRIM(r.nombre_rol)) = 'SUPERADMIN' THEN 'SUPER_ADMIN'
+        ELSE UPPER(TRIM(r.nombre_rol))
+      END
+    ) = cr.normalized_name
+      AND r.id_rol <> cr.canonical_id_rol
+  `);
+
+  await pool.query(`
     CREATE UNIQUE INDEX IF NOT EXISTS "uq_detalle_usuario_usuario_rol"
     ON "Detalle_usuario" (id_usuario, id_rol)
+  `);
+
+  await pool.query(`
+    CREATE UNIQUE INDEX IF NOT EXISTS "uq_rol_nombre_normalizado"
+    ON "Rol" (
+      (
+        CASE
+          WHEN UPPER(TRIM(nombre_rol)) = 'SUPERADMIN' THEN 'SUPER_ADMIN'
+          ELSE UPPER(TRIM(nombre_rol))
+        END
+      )
+    )
   `);
 
   await pool.query(`

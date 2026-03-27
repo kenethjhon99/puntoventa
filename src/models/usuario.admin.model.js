@@ -14,23 +14,35 @@ export const listarUsuarios = async () => {
       p.created_at AS persona_created_at,
       p.updated_at AS persona_updated_at,
       COALESCE(
-        jsonb_agg(DISTINCT jsonb_build_object(
-          'id_rol', r2.id_rol,
-          'nombre_rol',
-          CASE
-            WHEN UPPER(TRIM(r2.nombre_rol)) = 'SUPERADMIN' THEN 'SUPER_ADMIN'
-            ELSE UPPER(TRIM(r2.nombre_rol))
-          END
-        ))
-        FILTER (WHERE r2.id_rol IS NOT NULL),
+        (
+          SELECT jsonb_agg(
+            jsonb_build_object(
+              'id_rol', roles_limpios.id_rol,
+              'nombre_rol', roles_limpios.nombre_rol
+            )
+            ORDER BY roles_limpios.nombre_rol
+          )
+          FROM (
+            SELECT
+              MIN(r3.id_rol) AS id_rol,
+              CASE
+                WHEN UPPER(TRIM(r3.nombre_rol)) = 'SUPERADMIN' THEN 'SUPER_ADMIN'
+                ELSE UPPER(TRIM(r3.nombre_rol))
+              END AS nombre_rol
+            FROM "Detalle_usuario" du3
+            INNER JOIN "Rol" r3 ON r3.id_rol = du3.id_rol
+            WHERE du3.id_usuario = u.id_usuario
+              AND COALESCE(du3.activo, true) = true
+            GROUP BY CASE
+              WHEN UPPER(TRIM(r3.nombre_rol)) = 'SUPERADMIN' THEN 'SUPER_ADMIN'
+              ELSE UPPER(TRIM(r3.nombre_rol))
+            END
+          ) AS roles_limpios
+        ),
         '[]'::jsonb
       ) AS roles
     FROM "Usuario" u
     LEFT JOIN "Persona" p ON p.id_usuario = u.id_usuario
-    LEFT JOIN "Detalle_usuario" du
-      ON du.id_usuario = u.id_usuario
-     AND COALESCE(du.activo, true) = true
-    LEFT JOIN "Rol" r2 ON r2.id_rol = du.id_rol
     GROUP BY u.id_usuario, p.id_persona
     ORDER BY u.id_usuario DESC
   `);
