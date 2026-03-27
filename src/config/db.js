@@ -1255,6 +1255,45 @@ export async function ensureSchema() {
   `);
 
   await pool.query(`
+    UPDATE "Detalle_usuario" du
+    SET id_rol = canonical.id_rol
+    FROM (
+      SELECT MIN(id_rol) AS id_rol
+      FROM "Rol"
+      WHERE UPPER(TRIM(nombre_rol)) = 'SUPER_ADMIN'
+    ) AS canonical
+    INNER JOIN "Rol" legacy
+      ON UPPER(TRIM(legacy.nombre_rol)) = 'SUPERADMIN'
+    WHERE du.id_rol = legacy.id_rol
+      AND canonical.id_rol IS NOT NULL
+  `);
+
+  await pool.query(`
+    WITH ranked AS (
+      SELECT
+        ctid,
+        ROW_NUMBER() OVER (
+          PARTITION BY id_usuario, id_rol
+          ORDER BY
+            COALESCE(activo, true) DESC,
+            updated_at DESC NULLS LAST,
+            created_at DESC NULLS LAST,
+            ctid DESC
+        ) AS rn
+      FROM "Detalle_usuario"
+    )
+    DELETE FROM "Detalle_usuario" du
+    USING ranked
+    WHERE du.ctid = ranked.ctid
+      AND ranked.rn > 1
+  `);
+
+  await pool.query(`
+    CREATE UNIQUE INDEX IF NOT EXISTS "uq_detalle_usuario_usuario_rol"
+    ON "Detalle_usuario" (id_usuario, id_rol)
+  `);
+
+  await pool.query(`
     ALTER TABLE "Persona"
     ALTER COLUMN fecha_inicio SET DEFAULT CURRENT_DATE
   `);

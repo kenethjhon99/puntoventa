@@ -14,9 +14,16 @@ export const listarUsuarios = async () => {
       p.created_at AS persona_created_at,
       p.updated_at AS persona_updated_at,
       COALESCE(
-        json_agg(json_build_object('id_rol', r2.id_rol, 'nombre_rol', r2.nombre_rol))
+        jsonb_agg(DISTINCT jsonb_build_object(
+          'id_rol', r2.id_rol,
+          'nombre_rol',
+          CASE
+            WHEN UPPER(TRIM(r2.nombre_rol)) = 'SUPERADMIN' THEN 'SUPER_ADMIN'
+            ELSE UPPER(TRIM(r2.nombre_rol))
+          END
+        ))
         FILTER (WHERE r2.id_rol IS NOT NULL),
-        '[]'
+        '[]'::jsonb
       ) AS roles
     FROM "Usuario" u
     LEFT JOIN "Persona" p ON p.id_usuario = u.id_usuario
