@@ -10,7 +10,7 @@ import {
 
 const router = Router();
 
-router.get("/", auth, requireRole("ADMIN", "CAJERO"), listarClientes);
+router.get("/", auth, requireRole("ADMIN", "CAJERO", "LECTURA"), listarClientes);
 router.post("/", auth, requireRole("ADMIN", "CAJERO"), crearCliente);
 router.put("/:id", auth, requireRole("ADMIN"), actualizarCliente);
 router.patch("/:id/desactivar", auth, requireRole("ADMIN"), eliminarCliente);

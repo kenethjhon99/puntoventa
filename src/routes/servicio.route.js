@@ -31,14 +31,14 @@ const router = Router();
 router.get(
   "/tecnicos",
   auth,
-  requireRole("SUPER_ADMIN", "ADMIN", "CAJERO", "MECANICO"),
+  requireRole("SUPER_ADMIN", "ADMIN", "CAJERO", "MECANICO", "LECTURA"),
   listarTecnicosAsignables
 );
 
 router.get(
   "/autolavado/catalogo",
   auth,
-  requireRole("SUPER_ADMIN", "ADMIN", "CAJERO", "MECANICO"),
+  requireRole("SUPER_ADMIN", "ADMIN", "CAJERO", "MECANICO", "LECTURA"),
   listarCatalogoAutolavado
 );
 router.post(
@@ -74,7 +74,7 @@ router.post(
 router.get(
   "/autolavado/ordenes",
   auth,
-  requireRole("SUPER_ADMIN", "ADMIN", "CAJERO", "MECANICO"),
+  requireRole("SUPER_ADMIN", "ADMIN", "CAJERO", "MECANICO", "LECTURA"),
   listarOrdenesAutolavado
 );
 router.patch(
@@ -92,7 +92,7 @@ router.patch(
 router.get(
   "/reparacion/catalogo",
   auth,
-  requireRole("SUPER_ADMIN", "ADMIN", "CAJERO", "MECANICO"),
+  requireRole("SUPER_ADMIN", "ADMIN", "CAJERO", "MECANICO", "LECTURA"),
   listarCatalogoReparacion
 );
 router.post(
@@ -134,7 +134,7 @@ router.post(
 router.get(
   "/reparacion/ordenes",
   auth,
-  requireRole("SUPER_ADMIN", "ADMIN", "CAJERO", "MECANICO"),
+  requireRole("SUPER_ADMIN", "ADMIN", "CAJERO", "MECANICO", "LECTURA"),
   listarOrdenesReparacion
 );
 router.post(

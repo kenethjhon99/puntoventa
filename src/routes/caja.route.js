@@ -14,9 +14,9 @@ import {
 
 const router = Router();
 
-router.get("/sesion-activa", auth, requireRole("ADMIN", "CAJERO", "MECANICO"), getSesionActiva);
-router.get("/sesiones", auth, requireRole("ADMIN", "CAJERO", "MECANICO"), listarSesiones);
-router.get("/:id_sesion/resumen", auth, requireRole("ADMIN", "CAJERO", "MECANICO"), getResumenCaja);
+router.get("/sesion-activa", auth, requireRole("ADMIN", "CAJERO", "MECANICO", "LECTURA"), getSesionActiva);
+router.get("/sesiones", auth, requireRole("ADMIN", "CAJERO", "MECANICO", "LECTURA"), listarSesiones);
+router.get("/:id_sesion/resumen", auth, requireRole("ADMIN", "CAJERO", "MECANICO", "LECTURA"), getResumenCaja);
 router.post("/apertura", auth, requireRole("ADMIN", "CAJERO", "MECANICO"), abrirCaja);
 router.post("/:id_sesion/movimientos", auth, requireRole("ADMIN", "CAJERO", "MECANICO"), registrarMovimiento);
 router.post("/:id_sesion/pendientes/no-cobro/validar", auth, requireRole("ADMIN", "CAJERO", "MECANICO"), validarNoCobroPendiente);

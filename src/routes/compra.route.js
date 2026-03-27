@@ -15,10 +15,10 @@ const router = Router();
 router.post("/", auth, requireRole("ADMIN"), crearCompra);
 
 // Listar compras pro
-router.get("/", auth, requireRole("ADMIN"), listarCompras);
+router.get("/", auth, requireRole("ADMIN", "LECTURA"), listarCompras);
 
 // Ver compra completa
-router.get("/:id", auth, requireRole("ADMIN"), getCompra);
+router.get("/:id", auth, requireRole("ADMIN", "LECTURA"), getCompra);
 
 // Anular compra completa
 router.patch("/:id/anular", auth, requireRole("ADMIN"), anularCompra);

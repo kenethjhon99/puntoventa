@@ -18,7 +18,7 @@ router.post("/", auth, requireRole("ADMIN", "CAJERO"), crearVenta);
 router.get(
   "/comprobantes/catalogo",
   auth,
-  requireRole("ADMIN", "CAJERO"),
+  requireRole("ADMIN", "CAJERO", "LECTURA"),
   listarComprobantesVenta
 );
 
@@ -36,10 +36,10 @@ router.post(
   anularVentaCompleta
 );
 
-router.get("/:id", auth, requireRole("ADMIN", "CAJERO"), getVenta);
+router.get("/:id", auth, requireRole("ADMIN", "CAJERO", "LECTURA"), getVenta);
 
-router.get("/", auth, requireRole("ADMIN", "CAJERO"), listarVentas);
+router.get("/", auth, requireRole("ADMIN", "CAJERO", "LECTURA"), listarVentas);
 
-router.get("/:id/completa", auth, requireRole("ADMIN", "CAJERO"), getVentaCompleta);
+router.get("/:id/completa", auth, requireRole("ADMIN", "CAJERO", "LECTURA"), getVentaCompleta);
 
 export default router;

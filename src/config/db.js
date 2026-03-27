@@ -1242,10 +1242,11 @@ export async function ensureSchema() {
     SELECT rol.nombre_rol
     FROM (
       VALUES
-        ('SUPER_ADMIN'),
-        ('ADMIN'),
-        ('CAJERO'),
-        ('MECANICO')
+          ('SUPER_ADMIN'),
+          ('ADMIN'),
+          ('CAJERO'),
+          ('MECANICO'),
+          ('LECTURA')
     ) AS rol(nombre_rol)
     WHERE NOT EXISTS (
       SELECT 1

@@ -14,7 +14,7 @@ import { requireRole } from "../middlewares/requireRole.js";
 
 const router = Router();
 
-router.get("/", auth, requireRole("SUPER_ADMIN"), listarUsuarios);
+router.get("/", auth, requireRole("SUPER_ADMIN", "LECTURA"), listarUsuarios);
 router.post("/", auth, requireRole("SUPER_ADMIN"), crearUsuario);
 router.post("/:id", auth, requireRole("SUPER_ADMIN"), editarUsuario);
 
