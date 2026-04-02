@@ -1241,11 +1241,12 @@ export async function ensureSchema() {
     INSERT INTO "Rol" (nombre_rol)
     SELECT rol.nombre_rol
     FROM (
-      VALUES
+        VALUES
           ('SUPER_ADMIN'),
           ('ADMIN'),
           ('CAJERO'),
           ('MECANICO'),
+          ('ENCARGADO_SERVICIOS'),
           ('LECTURA')
     ) AS rol(nombre_rol)
     WHERE NOT EXISTS (

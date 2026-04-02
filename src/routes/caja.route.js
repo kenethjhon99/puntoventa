@@ -14,13 +14,13 @@ import {
 
 const router = Router();
 
-router.get("/sesion-activa", auth, requireRole("ADMIN", "CAJERO", "MECANICO", "LECTURA"), getSesionActiva);
-router.get("/sesiones", auth, requireRole("ADMIN", "CAJERO", "MECANICO", "LECTURA"), listarSesiones);
-router.get("/:id_sesion/resumen", auth, requireRole("ADMIN", "CAJERO", "MECANICO", "LECTURA"), getResumenCaja);
-router.post("/apertura", auth, requireRole("ADMIN", "CAJERO", "MECANICO"), abrirCaja);
-router.post("/:id_sesion/movimientos", auth, requireRole("ADMIN", "CAJERO", "MECANICO"), registrarMovimiento);
-router.post("/:id_sesion/pendientes/no-cobro/validar", auth, requireRole("ADMIN", "CAJERO", "MECANICO"), validarNoCobroPendiente);
-router.post("/:id_sesion/pendientes/movimientos/:id_movimiento/validar", auth, requireRole("ADMIN", "CAJERO", "MECANICO"), validarMovimientoPendiente);
-router.post("/:id_sesion/cierre", auth, requireRole("ADMIN", "CAJERO", "MECANICO"), cerrarCaja);
+router.get("/sesion-activa", auth, requireRole("ADMIN", "CAJERO", "MECANICO", "ENCARGADO_SERVICIOS", "LECTURA"), getSesionActiva);
+router.get("/sesiones", auth, requireRole("ADMIN", "CAJERO", "MECANICO", "ENCARGADO_SERVICIOS", "LECTURA"), listarSesiones);
+router.get("/:id_sesion/resumen", auth, requireRole("ADMIN", "CAJERO", "MECANICO", "ENCARGADO_SERVICIOS", "LECTURA"), getResumenCaja);
+router.post("/apertura", auth, requireRole("ADMIN", "CAJERO", "MECANICO", "ENCARGADO_SERVICIOS"), abrirCaja);
+router.post("/:id_sesion/movimientos", auth, requireRole("ADMIN", "CAJERO", "MECANICO", "ENCARGADO_SERVICIOS"), registrarMovimiento);
+router.post("/:id_sesion/pendientes/no-cobro/validar", auth, requireRole("ADMIN", "CAJERO", "MECANICO", "ENCARGADO_SERVICIOS"), validarNoCobroPendiente);
+router.post("/:id_sesion/pendientes/movimientos/:id_movimiento/validar", auth, requireRole("ADMIN", "CAJERO", "MECANICO", "ENCARGADO_SERVICIOS"), validarMovimientoPendiente);
+router.post("/:id_sesion/cierre", auth, requireRole("ADMIN", "CAJERO", "MECANICO", "ENCARGADO_SERVICIOS"), cerrarCaja);
 
 export default router;

@@ -13,12 +13,12 @@ import {
 
 const router = Router();
 
-router.post("/", auth, requireRole("ADMIN", "CAJERO"), crearVenta);
+router.post("/", auth, requireRole("ADMIN", "CAJERO", "ENCARGADO_SERVICIOS"), crearVenta);
 
 router.get(
   "/comprobantes/catalogo",
   auth,
-  requireRole("ADMIN", "CAJERO", "LECTURA"),
+  requireRole("ADMIN", "CAJERO", "ENCARGADO_SERVICIOS", "LECTURA"),
   listarComprobantesVenta
 );
 
@@ -36,10 +36,10 @@ router.post(
   anularVentaCompleta
 );
 
-router.get("/:id", auth, requireRole("ADMIN", "CAJERO", "LECTURA"), getVenta);
+router.get("/:id", auth, requireRole("ADMIN", "CAJERO", "ENCARGADO_SERVICIOS", "LECTURA"), getVenta);
 
-router.get("/", auth, requireRole("ADMIN", "CAJERO", "LECTURA"), listarVentas);
+router.get("/", auth, requireRole("ADMIN", "CAJERO", "ENCARGADO_SERVICIOS", "LECTURA"), listarVentas);
 
-router.get("/:id/completa", auth, requireRole("ADMIN", "CAJERO", "LECTURA"), getVentaCompleta);
+router.get("/:id/completa", auth, requireRole("ADMIN", "CAJERO", "ENCARGADO_SERVICIOS", "LECTURA"), getVentaCompleta);
 
 export default router;

@@ -7,13 +7,19 @@ const getNormalizedRoles = (req) =>
     .map((role) => String(role).trim().toUpperCase())
     .filter(Boolean);
 
+const isAdminProductManager = (req) =>
+  getNormalizedRoles(req).some((role) => ["SUPER_ADMIN", "ADMIN"].includes(role));
+
+const isServiciosProductManager = (req) =>
+  getNormalizedRoles(req).includes("ENCARGADO_SERVICIOS");
+
 const canAccessScope = (req, scope) => {
   const roles = getNormalizedRoles(req);
   const normalizedScope = String(scope || "GENERAL").trim().toUpperCase();
 
   if (normalizedScope === "SERVICIOS") {
     return roles.some((role) =>
-      ["SUPER_ADMIN", "ADMIN", "CAJERO", "MECANICO"].includes(role)
+      ["SUPER_ADMIN", "ADMIN", "CAJERO", "MECANICO", "ENCARGADO_SERVICIOS"].includes(role)
     );
   }
 
@@ -52,13 +58,21 @@ export const crearProducto = async (req, res) => {
       ubicacion
     } = req.body;
 
+    const requestedScope = String(modulo_origen || "GENERAL").trim().toUpperCase();
+
+    if (isServiciosProductManager(req) && !isAdminProductManager(req) && requestedScope !== "SERVICIOS") {
+      return res.status(403).json({
+        error: "Este rol solo puede crear productos del catalogo Tienda",
+      });
+    }
+
     const creado = await Producto.createProductoConStock({
       codigo_barras,
       nombre,
       descripcion,
       precio_compra,
       precio_venta,
-      modulo_origen: String(modulo_origen || "GENERAL").trim().toUpperCase(),
+      modulo_origen: requestedScope,
       existencia_inicial: Number(existencia_inicial || 0),
       stock_minimo: Number(stock_minimo || 0),
       ubicacion: ubicacion ?? null,
@@ -83,6 +97,21 @@ export const actualizarProducto = async (req, res) => {
       return res.status(400).json({ error: "id inválido" });
     }
 
+    const productoActual = await Producto.getProductoById(Number(id));
+    if (!productoActual) {
+      return res.status(404).json({ error: "Producto no encontrado" });
+    }
+
+    if (
+      isServiciosProductManager(req) &&
+      !isAdminProductManager(req) &&
+      String(productoActual.modulo_origen || "GENERAL").trim().toUpperCase() !== "SERVICIOS"
+    ) {
+      return res.status(403).json({
+        error: "Este rol solo puede editar productos del catalogo Tienda",
+      });
+    }
+
     const {
       existencia_inicial,
       stock_minimo,
@@ -94,6 +123,19 @@ export const actualizarProducto = async (req, res) => {
       datosProducto.modulo_origen = String(datosProducto.modulo_origen || "GENERAL")
         .trim()
         .toUpperCase();
+    }
+
+    if (isServiciosProductManager(req) && !isAdminProductManager(req)) {
+      if (
+        datosProducto.modulo_origen !== undefined &&
+        datosProducto.modulo_origen !== "SERVICIOS"
+      ) {
+        return res.status(403).json({
+          error: "Este rol solo puede mantener productos como Tienda",
+        });
+      }
+
+      datosProducto.modulo_origen = "SERVICIOS";
     }
 
     if (
@@ -183,6 +225,22 @@ export const actualizarProducto = async (req, res) => {
 export const eliminarProducto = async (req, res) => {
   try {
     const { id } = req.params;
+    const productoActual = await Producto.getProductoById(Number(id));
+
+    if (!productoActual) {
+      return res.status(404).json({ error: "Producto no encontrado" });
+    }
+
+    if (
+      isServiciosProductManager(req) &&
+      !isAdminProductManager(req) &&
+      String(productoActual.modulo_origen || "GENERAL").trim().toUpperCase() !== "SERVICIOS"
+    ) {
+      return res.status(403).json({
+        error: "Este rol solo puede desactivar productos del catalogo Tienda",
+      });
+    }
+
     const eliminado = await Producto.deleteProducto(
       id,
       req.user?.id_usuario ?? null
