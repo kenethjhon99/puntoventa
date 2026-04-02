@@ -1238,6 +1238,11 @@ export async function ensureSchema() {
   `);
 
   await pool.query(`
+    ALTER TABLE "Rol"
+    ALTER COLUMN nombre_rol TYPE character varying(40)
+  `);
+
+  await pool.query(`
     INSERT INTO "Rol" (nombre_rol)
     SELECT rol.nombre_rol
     FROM (
