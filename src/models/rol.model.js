@@ -12,7 +12,14 @@ export const getRoles = async () => {
     WHERE CASE
       WHEN UPPER(TRIM(nombre_rol)) = 'SUPERADMIN' THEN 'SUPER_ADMIN'
       ELSE UPPER(TRIM(nombre_rol))
-    END IN ('SUPER_ADMIN', 'ADMIN', 'CAJERO', 'MECANICO', 'LECTURA')
+    END IN (
+      'SUPER_ADMIN',
+      'ADMIN',
+      'CAJERO',
+      'MECANICO',
+      'LECTURA',
+      'ENCARGADO_SERVICIOS'
+    )
     GROUP BY CASE
       WHEN UPPER(TRIM(nombre_rol)) = 'SUPERADMIN' THEN 'SUPER_ADMIN'
       ELSE UPPER(TRIM(nombre_rol))
