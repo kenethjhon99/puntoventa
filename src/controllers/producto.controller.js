@@ -44,6 +44,15 @@ export const listarProductos = async (req, res) => {
   }
 };
 
+export const generarCodigoBarrasProducto = async (_req, res) => {
+  try {
+    const codigo_barras = await Producto.generateUniqueCodigoBarras();
+    res.json({ codigo_barras });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+};
+
 export const crearProducto = async (req, res) => {
   try {
     const {

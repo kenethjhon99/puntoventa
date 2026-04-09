@@ -1,5 +1,28 @@
 import { pool } from "../config/db.js";
 
+const calculateEan13CheckDigit = (baseValue) => {
+  const digits = String(baseValue || "").replace(/\D/g, "");
+
+  if (digits.length !== 12) {
+    throw new Error("El codigo base debe tener 12 digitos");
+  }
+
+  const total = digits.split("").reduce((acc, digit, index) => {
+    const factor = index % 2 === 0 ? 1 : 3;
+    return acc + Number(digit) * factor;
+  }, 0);
+
+  return (10 - (total % 10)) % 10;
+};
+
+const buildInternalEan13Candidate = () => {
+  const seed = `${Date.now()}${Math.floor(Math.random() * 10000)
+    .toString()
+    .padStart(4, "0")}`.replace(/\D/g, "");
+  const base12 = `20${seed.slice(-10).padStart(10, "0")}`;
+  return `${base12}${calculateEan13CheckDigit(base12)}`;
+};
+
 export const getProductos = async ({ scope = "GENERAL" } = {}) => {
   const normalizedScope = String(scope || "GENERAL").trim().toUpperCase();
   const params = [];
@@ -155,6 +178,19 @@ export const existsCodigoBarras = async (codigo_barras, excludeId = null) => {
     [codigo_barras]
   );
   return r.rowCount > 0;
+};
+
+export const generateUniqueCodigoBarras = async () => {
+  for (let attempt = 0; attempt < 30; attempt += 1) {
+    const codigo = buildInternalEan13Candidate();
+    const exists = await existsCodigoBarras(codigo);
+
+    if (!exists) {
+      return codigo;
+    }
+  }
+
+  throw new Error("No se pudo generar un codigo de barras unico");
 };
 
 export const deleteProducto = async (id, actorId = null) => {
