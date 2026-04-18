@@ -10,11 +10,19 @@ export const crearCompra = async (req, res) => {
       id_bodega,
       fecha_compra,
       observaciones,
+      dias_credito,
+      termino_pago,
+      moneda,
       items
     } = req.body;
 
     if (!id_proveedor) return res.status(400).json({ error: "id_proveedor es requerido" });
     if (!Array.isArray(items) || items.length === 0) return res.status(400).json({ error: "items es requerido" });
+
+    const diasCreditoNum = Number(dias_credito ?? 0);
+    if (!Number.isFinite(diasCreditoNum) || diasCreditoNum < 0 || diasCreditoNum > 365) {
+      return res.status(400).json({ error: "dias_credito debe estar entre 0 y 365" });
+    }
 
     const compra = await Compra.crearCompra({
       tipo_documento,
@@ -25,6 +33,9 @@ export const crearCompra = async (req, res) => {
       id_proveedor: Number(id_proveedor),
       id_sucursal: Number(id_sucursal || 1),
       id_bodega: Number(id_bodega || 1),
+      dias_credito: diasCreditoNum,
+      termino_pago,
+      moneda,
       items
     });
 

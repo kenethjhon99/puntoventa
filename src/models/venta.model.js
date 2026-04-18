@@ -1,4 +1,5 @@
 import { pool } from "../config/db.js";
+import { calculateDiscountedSaleLine, normalizeDiscountPercentage } from "../utils/ventaDiscount.js";
 
 const TIPO_COMPROBANTE_DEFAULT = "TICKET";
 
@@ -335,6 +336,7 @@ export const crearVenta = async ({
   metodo_pago,
   tipo_comprobante = TIPO_COMPROBANTE_DEFAULT,
   monto_recibido = null,
+  descuento_porcentaje = 0,
   no_cobrar = false,
   no_cobrado_motivo = null,
   no_cobrado_autorizado_por = null,
@@ -348,6 +350,7 @@ export const crearVenta = async ({
 
     const comprobante = await emitirComprobanteVenta(client, tipo_comprobante);
     const ventaSinCobro = Boolean(no_cobrar);
+    const descuentoPorcentajeNormalizado = normalizeDiscountPercentage(descuento_porcentaje);
     const metodoPagoNormalizado = String(metodo_pago ?? "EFECTIVO")
       .trim()
       .toUpperCase();
@@ -364,6 +367,43 @@ export const crearVenta = async ({
       (!Number.isFinite(montoRecibidoNormalizado) || montoRecibidoNormalizado < 0)
     ) {
       throw new Error("monto_recibido debe ser un numero mayor o igual a 0");
+    }
+
+    let cliente = null;
+    if (id_cliente != null) {
+      const rCliente = await client.query(
+        `
+          SELECT
+            "Id_clientes" AS id_cliente,
+            nombre,
+            estado,
+            UPPER(COALESCE(tipo_cliente, 'NORMAL')) AS tipo_cliente
+          FROM "Clientes"
+          WHERE "Id_clientes" = $1
+          LIMIT 1
+        `,
+        [id_cliente]
+      );
+
+      if (rCliente.rowCount === 0) {
+        throw new Error("Cliente no encontrado");
+      }
+
+      cliente = rCliente.rows[0];
+
+      if (!cliente.estado) {
+        throw new Error("El cliente seleccionado esta inactivo");
+      }
+    }
+
+    if (descuentoPorcentajeNormalizado > 0) {
+      if (!cliente) {
+        throw new Error("Debes seleccionar un cliente para aplicar descuento");
+      }
+
+      if (!["NORMAL", "MAYORISTA"].includes(cliente.tipo_cliente)) {
+        throw new Error("El descuento solo aplica a clientes normales y mayoristas");
+      }
     }
 
     const rVenta = await client.query(
@@ -384,6 +424,8 @@ export const crearVenta = async ({
       numero_comprobante,
       monto_recibido,
       cambio_entregado,
+      descuento_porcentaje,
+      descuento_total,
       no_cobrado_motivo,
       no_cobrado_autorizado_por,
       no_cobrado_autorizado_en,
@@ -393,8 +435,8 @@ export const crearVenta = async ({
     )
    VALUES (
       now(), 0, $1, $2, $3, $4, $5, $6, $7,
-      $8, $9, $10, $11, $12, NULL, 0,
-      $13, $14, CASE WHEN $15 THEN now() ELSE NULL END, NULL, NULL, NULL
+      $8, $9, $10, $11, $12, NULL, 0, $13, 0,
+      $14, $15, CASE WHEN $16 THEN now() ELSE NULL END, NULL, NULL, NULL
    )
    RETURNING id_venta,
             (fecha AT TIME ZONE 'America/Guatemala') AS fecha,
@@ -403,6 +445,7 @@ export const crearVenta = async ({
             monto_recibido, cambio_entregado,
             (anulada_en AT TIME ZONE 'America/Guatemala') AS anulada_en,
             anulada_por, motivo_anulacion,
+            descuento_porcentaje, descuento_total,
             no_cobrado_motivo, no_cobrado_autorizado_por,
             (no_cobrado_autorizado_en AT TIME ZONE 'America/Guatemala') AS no_cobrado_autorizado_en,
             no_cobrado_validado_por,
@@ -421,6 +464,7 @@ export const crearVenta = async ({
     comprobante.serie_comprobante,
     comprobante.correlativo_comprobante,
     comprobante.numero_comprobante,
+    descuentoPorcentajeNormalizado,
     ventaSinCobro ? no_cobrado_motivo : null,
     ventaSinCobro ? no_cobrado_autorizado_por : null,
     ventaSinCobro,
@@ -430,6 +474,7 @@ export const crearVenta = async ({
     const venta = rVenta.rows[0];
     let total = 0;
     let utilidad_total = 0;
+    let descuento_total = 0;
 
     for (const it of items) {
       const id_producto = Number(it.id_producto);
@@ -448,12 +493,9 @@ export const crearVenta = async ({
 );
       if (rProd.rowCount === 0) throw new Error(`Producto no existe: ${id_producto}`);
 
-      //const precio_unitario = Number(rProd.rows[0].precio_venta);
-      //const nombreProd = rProd.rows[0].nombre;
-
-      const precio_unitario = Number(rProd.rows[0].precio_venta);
-const costo_unitario = Number(rProd.rows[0].precio_compra || 0);
-const nombreProd = rProd.rows[0].nombre;
+      const precio_lista_unitario = Number(rProd.rows[0].precio_venta);
+      const costo_unitario = Number(rProd.rows[0].precio_compra || 0);
+      const nombreProd = rProd.rows[0].nombre;
 
 
       // stock lock
@@ -471,32 +513,48 @@ const nombreProd = rProd.rows[0].nombre;
 
       const despues = antes - cantidad;
 
-      const subtotal = Number((precio_unitario * cantidad).toFixed(2));
-      const costo_total = Number((costo_unitario * cantidad).toFixed(2));
-      const utilidad = Number((subtotal - costo_total).toFixed(2));
+      const calculo = calculateDiscountedSaleLine({
+        salePrice: precio_lista_unitario,
+        costPrice: costo_unitario,
+        quantity: cantidad,
+        discountPercentage: descuentoPorcentajeNormalizado,
+      });
+      const precio_unitario = calculo.precioFinalUnitario;
+      const subtotal = calculo.subtotal;
+      const costo_total = calculo.costoTotal;
+      const utilidad = calculo.utilidad;
 
       total += subtotal;
       utilidad_total += utilidad;
+      descuento_total += calculo.descuentoTotal;
 
       await client.query(
   `INSERT INTO "Detalle_venta"(
       id_venta,
       id_producto,
       cantidad,
+      precio_lista_unitario,
       precio_unitario,
       costo_unitario,
+      descuento_porcentaje,
+      descuento_unitario,
+      descuento_total,
       subtotal,
       utilidad,
       estado,
       cantidad_anulada
    )
-   VALUES ($1,$2,$3,$4,$5,$6,$7,'ACTIVO',0)`,
+   VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,'ACTIVO',0)`,
   [
     venta.id_venta,
     id_producto,
     cantidad,
+    calculo.precioListaUnitario,
     precio_unitario,
     costo_unitario,
+    calculo.descuentoPorcentaje,
+    calculo.descuentoUnitario,
+    calculo.descuentoTotal,
     subtotal,
     utilidad
   ]
@@ -522,8 +580,9 @@ const nombreProd = rProd.rows[0].nombre;
        SET total = $1,
            utilidad_total = $2,
            monto_recibido = $3,
-           cambio_entregado = $4
-       WHERE id_venta = $5
+           cambio_entregado = $4,
+           descuento_total = $5
+       WHERE id_venta = $6
        RETURNING *`,
       [
         Number(total.toFixed(2)),
@@ -536,6 +595,7 @@ const nombreProd = rProd.rows[0].nombre;
         montoRecibidoNormalizado != null
           ? Number(Math.max(0, montoRecibidoNormalizado - total).toFixed(2))
           : 0,
+        Number(descuento_total.toFixed(2)),
         venta.id_venta,
       ]
     );
@@ -560,6 +620,7 @@ export const getVentaById = async (id_venta) => {
         c.codigo   AS cliente_codigo,
         c.nombre   AS cliente_nombre,
         c.nit      AS cliente_nit,
+        UPPER(COALESCE(c.tipo_cliente, 'NORMAL')) AS cliente_tipo_cliente,
         cs.nombre  AS comprobante_nombre
      FROM "Venta" v
      JOIN "Usuario" u ON u.id_usuario = v.id_usuario
@@ -701,6 +762,7 @@ export const listarVentas = async (filters) => {
         c.codigo   AS cliente_codigo,
         c.nombre   AS cliente_nombre,
         c.nit      AS cliente_nit,
+        UPPER(COALESCE(c.tipo_cliente, 'NORMAL')) AS cliente_tipo_cliente,
         cs.nombre  AS comprobante_nombre
      FROM "Venta" v
      JOIN "Usuario" u ON u.id_usuario = v.id_usuario
@@ -736,6 +798,7 @@ export const getVentaCompleta = async (id_venta) => {
         c.codigo   AS cliente_codigo,
         c.nombre   AS cliente_nombre,
         c.nit      AS cliente_nit,
+        UPPER(COALESCE(c.tipo_cliente, 'NORMAL')) AS cliente_tipo_cliente,
         cs.nombre  AS comprobante_nombre
      FROM "Venta" v
      JOIN "Usuario" u ON u.id_usuario = v.id_usuario

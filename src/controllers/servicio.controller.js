@@ -505,6 +505,24 @@ export const listarOrdenesReparacion = async (req, res) => {
   }
 };
 
+export const getReciboOrdenReparacion = async (req, res) => {
+  try {
+    const idReparacionOrden = Number(req.params.id);
+    if (!Number.isInteger(idReparacionOrden) || idReparacionOrden <= 0) {
+      return res.status(400).json({ error: "id_reparacion_orden invalido" });
+    }
+
+    const data = await Servicio.getReciboReparacion(idReparacionOrden);
+    if (!data) {
+      return res.status(404).json({ error: "Orden de reparacion no encontrada" });
+    }
+
+    res.json({ ok: true, ...data });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+};
+
 export const listarTecnicosAsignables = async (req, res) => {
   try {
     const tecnicos = await Servicio.getTecnicosAsignables();

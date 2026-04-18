@@ -12,6 +12,7 @@ import {
   actualizarEstadoOrdenAutolavado,
   agregarProductoOrdenReparacion,
   cobrarOrdenReparacion,
+  getReciboOrdenReparacion,
   cobrarServicioReparacion,
   cobrarServicioAutolavado,
   crearOrdenReparacion,
@@ -31,14 +32,14 @@ const router = Router();
 router.get(
   "/tecnicos",
   auth,
-  requireRole("SUPER_ADMIN", "ADMIN", "CAJERO", "MECANICO", "ENCARGADO_SERVICIOS", "LECTURA"),
+  requireRole("SUPER_ADMIN", "ADMIN", "MECANICO", "ENCARGADO_SERVICIOS", "LECTURA"),
   listarTecnicosAsignables
 );
 
 router.get(
   "/autolavado/catalogo",
   auth,
-  requireRole("SUPER_ADMIN", "ADMIN", "CAJERO", "MECANICO", "ENCARGADO_SERVICIOS", "LECTURA"),
+  requireRole("SUPER_ADMIN", "ADMIN", "MECANICO", "ENCARGADO_SERVICIOS", "LECTURA"),
   listarCatalogoAutolavado
 );
 router.post(
@@ -68,31 +69,31 @@ router.put(
 router.post(
   "/autolavado/cobros",
   auth,
-  requireRole("SUPER_ADMIN", "ADMIN", "CAJERO", "MECANICO", "ENCARGADO_SERVICIOS"),
+  requireRole("SUPER_ADMIN", "ADMIN", "MECANICO", "ENCARGADO_SERVICIOS"),
   cobrarServicioAutolavado
 );
 router.get(
   "/autolavado/ordenes",
   auth,
-  requireRole("SUPER_ADMIN", "ADMIN", "CAJERO", "MECANICO", "ENCARGADO_SERVICIOS", "LECTURA"),
+  requireRole("SUPER_ADMIN", "ADMIN", "MECANICO", "ENCARGADO_SERVICIOS", "LECTURA"),
   listarOrdenesAutolavado
 );
 router.patch(
   "/autolavado/ordenes/:id/estado",
   auth,
-  requireRole("SUPER_ADMIN", "ADMIN", "CAJERO", "MECANICO", "ENCARGADO_SERVICIOS"),
+  requireRole("SUPER_ADMIN", "ADMIN", "MECANICO", "ENCARGADO_SERVICIOS"),
   actualizarEstadoOrdenAutolavado
 );
 router.patch(
   "/autolavado/ordenes/:id/tecnico",
   auth,
-  requireRole("SUPER_ADMIN", "ADMIN", "CAJERO", "MECANICO", "ENCARGADO_SERVICIOS"),
+  requireRole("SUPER_ADMIN", "ADMIN", "MECANICO", "ENCARGADO_SERVICIOS"),
   asignarTecnicoOrdenAutolavado
 );
 router.get(
   "/reparacion/catalogo",
   auth,
-  requireRole("SUPER_ADMIN", "ADMIN", "CAJERO", "MECANICO", "ENCARGADO_SERVICIOS", "LECTURA"),
+  requireRole("SUPER_ADMIN", "ADMIN", "MECANICO", "ENCARGADO_SERVICIOS", "LECTURA"),
   listarCatalogoReparacion
 );
 router.post(
@@ -122,43 +123,49 @@ router.put(
 router.post(
   "/reparacion/cobros",
   auth,
-  requireRole("SUPER_ADMIN", "ADMIN", "CAJERO", "MECANICO", "ENCARGADO_SERVICIOS"),
+  requireRole("SUPER_ADMIN", "ADMIN", "MECANICO", "ENCARGADO_SERVICIOS"),
   cobrarServicioReparacion
 );
 router.post(
   "/reparacion/ordenes",
   auth,
-  requireRole("SUPER_ADMIN", "ADMIN", "CAJERO", "MECANICO", "ENCARGADO_SERVICIOS"),
+  requireRole("SUPER_ADMIN", "ADMIN", "MECANICO", "ENCARGADO_SERVICIOS"),
   crearOrdenReparacion
 );
 router.get(
   "/reparacion/ordenes",
   auth,
-  requireRole("SUPER_ADMIN", "ADMIN", "CAJERO", "MECANICO", "ENCARGADO_SERVICIOS", "LECTURA"),
+  requireRole("SUPER_ADMIN", "ADMIN", "MECANICO", "ENCARGADO_SERVICIOS", "LECTURA"),
   listarOrdenesReparacion
+);
+router.get(
+  "/reparacion/ordenes/:id/recibo",
+  auth,
+  requireRole("SUPER_ADMIN", "ADMIN", "MECANICO", "ENCARGADO_SERVICIOS", "LECTURA"),
+  getReciboOrdenReparacion
 );
 router.post(
   "/reparacion/ordenes/:id/cobro",
   auth,
-  requireRole("SUPER_ADMIN", "ADMIN", "CAJERO", "MECANICO", "ENCARGADO_SERVICIOS"),
+  requireRole("SUPER_ADMIN", "ADMIN", "MECANICO", "ENCARGADO_SERVICIOS"),
   cobrarOrdenReparacion
 );
 router.post(
   "/reparacion/ordenes/:id/productos",
   auth,
-  requireRole("SUPER_ADMIN", "ADMIN", "CAJERO", "MECANICO", "ENCARGADO_SERVICIOS"),
+  requireRole("SUPER_ADMIN", "ADMIN", "MECANICO", "ENCARGADO_SERVICIOS"),
   agregarProductoOrdenReparacion
 );
 router.patch(
   "/reparacion/ordenes/:id/estado",
   auth,
-  requireRole("SUPER_ADMIN", "ADMIN", "CAJERO", "MECANICO", "ENCARGADO_SERVICIOS"),
+  requireRole("SUPER_ADMIN", "ADMIN", "MECANICO", "ENCARGADO_SERVICIOS"),
   actualizarEstadoOrdenReparacion
 );
 router.patch(
   "/reparacion/ordenes/:id/tecnico",
   auth,
-  requireRole("SUPER_ADMIN", "ADMIN", "CAJERO", "MECANICO", "ENCARGADO_SERVICIOS"),
+  requireRole("SUPER_ADMIN", "ADMIN", "MECANICO", "ENCARGADO_SERVICIOS"),
   asignarTecnicoOrdenReparacion
 );
 

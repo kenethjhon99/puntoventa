@@ -1,0 +1,126 @@
+{
+  "info": {
+    "name": "POS Carwash - Empleados",
+    "_postman_id": "b8b51b9d-5bc8-4f5a-aab1-empleados-module",
+    "description": "Coleccion de pruebas para el modulo EMPLEADOS.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "http://localhost:3000/api"
+    },
+    {
+      "key": "token",
+      "value": ""
+    },
+    {
+      "key": "empleadoId",
+      "value": "1"
+    }
+  ],
+  "item": [
+    {
+      "name": "Listar empleados",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{token}}"
+          }
+        ],
+        "url": "{{baseUrl}}/empleados?incluirInactivos=true"
+      }
+    },
+    {
+      "name": "Crear empleado CARWASH",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "Authorization",
+            "value": "Bearer {{token}}"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"nombre\": \"Pedro Lavador\",\n  \"cargo\": \"CARWASH\"\n}"
+        },
+        "url": "{{baseUrl}}/empleados"
+      }
+    },
+    {
+      "name": "Crear empleado VENDEDOR",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "Authorization",
+            "value": "Bearer {{token}}"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"nombre\": \"Ana Ventas\",\n  \"cargo\": \"VENDEDOR\"\n}"
+        },
+        "url": "{{baseUrl}}/empleados"
+      }
+    },
+    {
+      "name": "Actualizar empleado",
+      "request": {
+        "method": "PUT",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "Authorization",
+            "value": "Bearer {{token}}"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"nombre\": \"Ana Ventas Actualizada\",\n  \"cargo\": \"VENDEDOR\"\n}"
+        },
+        "url": "{{baseUrl}}/empleados/{{empleadoId}}"
+      }
+    },
+    {
+      "name": "Desactivar empleado",
+      "request": {
+        "method": "PATCH",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{token}}"
+          }
+        ],
+        "url": "{{baseUrl}}/empleados/{{empleadoId}}/desactivar"
+      }
+    },
+    {
+      "name": "Activar empleado",
+      "request": {
+        "method": "PATCH",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{token}}"
+          }
+        ],
+        "url": "{{baseUrl}}/empleados/{{empleadoId}}/activar"
+      }
+    }
+  ]
+}

@@ -42,6 +42,8 @@ const AUDIT_TABLES = [
   "Producto",
   "Proveedor",
   "Clientes",
+  "Empleado",
+  "Credito_empleado",
   "Usuario",
   "Persona",
   "Compra",
@@ -58,6 +60,7 @@ const SOFT_DELETE_TABLES = [
   { tableName: "Producto", activeColumn: "activo" },
   { tableName: "Proveedor", activeColumn: "estado" },
   { tableName: "Clientes", activeColumn: "estado" },
+  { tableName: "Empleado", activeColumn: "activo" },
   { tableName: "Usuario", activeColumn: "activo" },
   { tableName: "Persona", activeColumn: "estado" },
   { tableName: "Detalle_usuario", activeColumn: "activo" },
@@ -253,6 +256,49 @@ export async function ensureSchema() {
     $$ LANGUAGE plpgsql;
   `);
 
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS "Empleado" (
+      id_empleado serial PRIMARY KEY,
+      nombre character varying(150) NOT NULL,
+      cargo character varying(20) NOT NULL,
+      tipo_pago character varying(20) NOT NULL,
+      activo boolean NOT NULL DEFAULT true,
+      CONSTRAINT chk_empleado_cargo
+        CHECK (cargo IN ('CARWASH', 'VENDEDOR')),
+      CONSTRAINT chk_empleado_tipo_pago
+        CHECK (tipo_pago IN ('SEMANAL', 'MENSUAL')),
+      CONSTRAINT chk_empleado_regla_pago
+        CHECK (
+          (cargo = 'CARWASH' AND tipo_pago = 'SEMANAL')
+          OR
+          (cargo = 'VENDEDOR' AND tipo_pago = 'MENSUAL')
+        )
+    )
+  `);
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS "Credito_empleado" (
+      id_credito_empleado serial PRIMARY KEY,
+      id_venta integer NOT NULL REFERENCES "Venta"(id_venta),
+      id_empleado integer NOT NULL REFERENCES "Empleado"(id_empleado),
+      tipo_pago character varying(20) NOT NULL,
+      monto numeric(12,2) NOT NULL DEFAULT 0,
+      fecha_credito timestamp with time zone NOT NULL DEFAULT now(),
+      fecha_cobro date NOT NULL,
+      estado character varying(20) NOT NULL DEFAULT 'PENDIENTE',
+      alerta_admin_generada_en timestamp with time zone NOT NULL DEFAULT now(),
+      alerta_admin_leida_por integer REFERENCES "Usuario"(id_usuario),
+      alerta_admin_leida_en timestamp with time zone,
+      fecha_cobrado timestamp with time zone,
+      cobrado_por integer REFERENCES "Usuario"(id_usuario),
+      nota_estado text,
+      CONSTRAINT chk_credito_empleado_tipo_pago
+        CHECK (tipo_pago IN ('SEMANAL', 'MENSUAL')),
+      CONSTRAINT chk_credito_empleado_estado
+        CHECK (estado IN ('PENDIENTE', 'COBRADO', 'CANCELADO'))
+    )
+  `);
+
   for (const tableName of AUDIT_TABLES) {
     await ensureAuditColumnsForTable(tableName);
   }
@@ -264,6 +310,31 @@ export async function ensureSchema() {
   for (const tableName of AUDIT_TABLES) {
     await ensureUpdatedAtTriggerForTable(tableName);
   }
+
+  await pool.query(`
+    CREATE INDEX IF NOT EXISTS "idx_empleado_cargo"
+    ON "Empleado" (cargo)
+  `);
+
+  await pool.query(`
+    CREATE INDEX IF NOT EXISTS "idx_empleado_activo"
+    ON "Empleado" (activo)
+  `);
+
+  await pool.query(`
+    CREATE UNIQUE INDEX IF NOT EXISTS "uq_credito_empleado_venta"
+    ON "Credito_empleado" (id_venta)
+  `);
+
+  await pool.query(`
+    CREATE INDEX IF NOT EXISTS "idx_credito_empleado_empleado_estado"
+    ON "Credito_empleado" (id_empleado, estado, fecha_cobro ASC)
+  `);
+
+  await pool.query(`
+    CREATE INDEX IF NOT EXISTS "idx_credito_empleado_estado_cobro"
+    ON "Credito_empleado" (estado, fecha_cobro ASC)
+  `);
 
   await pool.query(`
     ALTER TABLE "Clientes"
@@ -283,6 +354,36 @@ export async function ensureSchema() {
   await pool.query(`
     ALTER TABLE "Clientes"
     ADD COLUMN IF NOT EXISTS direccion character varying(250)
+  `);
+
+  await pool.query(`
+    ALTER TABLE "Clientes"
+    ADD COLUMN IF NOT EXISTS tipo_cliente character varying(20) NOT NULL DEFAULT 'NORMAL'
+  `);
+
+  await pool.query(`
+    UPDATE "Clientes"
+    SET tipo_cliente = 'NORMAL'
+    WHERE tipo_cliente IS NULL
+       OR BTRIM(tipo_cliente) = ''
+       OR UPPER(BTRIM(tipo_cliente)) NOT IN ('NORMAL', 'MAYORISTA')
+  `);
+
+  await pool.query(`
+    DO $$
+    BEGIN
+      IF NOT EXISTS (
+        SELECT 1
+        FROM information_schema.table_constraints
+        WHERE table_schema = 'public'
+          AND table_name = 'Clientes'
+          AND constraint_name = 'chk_clientes_tipo_cliente'
+      ) THEN
+        ALTER TABLE "Clientes"
+        ADD CONSTRAINT chk_clientes_tipo_cliente
+        CHECK (UPPER(BTRIM(tipo_cliente)) IN ('NORMAL', 'MAYORISTA'));
+      END IF;
+    END $$;
   `);
 
   await pool.query(`
@@ -376,6 +477,57 @@ export async function ensureSchema() {
   await pool.query(`
     ALTER TABLE "Venta"
     ADD COLUMN IF NOT EXISTS no_cobrado_validacion_nota text
+  `);
+
+  await pool.query(`
+    ALTER TABLE "Venta"
+    ADD COLUMN IF NOT EXISTS descuento_porcentaje numeric(5,2) NOT NULL DEFAULT 0
+  `);
+
+  await pool.query(`
+    ALTER TABLE "Venta"
+    ADD COLUMN IF NOT EXISTS descuento_total numeric(12,2) NOT NULL DEFAULT 0
+  `);
+
+  await pool.query(`
+    UPDATE "Venta"
+    SET descuento_porcentaje = COALESCE(descuento_porcentaje, 0),
+        descuento_total = COALESCE(descuento_total, 0)
+    WHERE descuento_porcentaje IS NULL
+       OR descuento_total IS NULL
+  `);
+
+  await pool.query(`
+    ALTER TABLE "Detalle_venta"
+    ADD COLUMN IF NOT EXISTS precio_lista_unitario numeric(12,2) NOT NULL DEFAULT 0
+  `);
+
+  await pool.query(`
+    ALTER TABLE "Detalle_venta"
+    ADD COLUMN IF NOT EXISTS descuento_porcentaje numeric(5,2) NOT NULL DEFAULT 0
+  `);
+
+  await pool.query(`
+    ALTER TABLE "Detalle_venta"
+    ADD COLUMN IF NOT EXISTS descuento_unitario numeric(12,2) NOT NULL DEFAULT 0
+  `);
+
+  await pool.query(`
+    ALTER TABLE "Detalle_venta"
+    ADD COLUMN IF NOT EXISTS descuento_total numeric(12,2) NOT NULL DEFAULT 0
+  `);
+
+  await pool.query(`
+    UPDATE "Detalle_venta"
+    SET precio_lista_unitario = COALESCE(NULLIF(precio_lista_unitario, 0), precio_unitario),
+        descuento_porcentaje = COALESCE(descuento_porcentaje, 0),
+        descuento_unitario = COALESCE(descuento_unitario, 0),
+        descuento_total = COALESCE(descuento_total, 0)
+    WHERE precio_lista_unitario IS NULL
+       OR descuento_porcentaje IS NULL
+       OR descuento_unitario IS NULL
+       OR descuento_total IS NULL
+       OR precio_lista_unitario = 0
   `);
 
   await pool.query(`
@@ -1007,15 +1159,20 @@ export async function ensureSchema() {
     ADD COLUMN IF NOT EXISTS estado_trabajo character varying(20) NOT NULL DEFAULT 'RECIBIDO'
   `);
 
-  await pool.query(`
-    ALTER TABLE "Autolavado_orden"
-    ADD COLUMN IF NOT EXISTS id_tecnico_asignado integer REFERENCES "Usuario"(id_usuario)
-  `);
+    await pool.query(`
+      ALTER TABLE "Autolavado_orden"
+      ADD COLUMN IF NOT EXISTS id_tecnico_asignado integer REFERENCES "Usuario"(id_usuario)
+    `);
 
-  await pool.query(`
-    ALTER TABLE "Autolavado_orden"
-    ADD COLUMN IF NOT EXISTS tecnico_asignado_en timestamp with time zone
-  `);
+    await pool.query(`
+      ALTER TABLE "Autolavado_orden"
+      ADD COLUMN IF NOT EXISTS id_empleado_tecnico_asignado integer REFERENCES "Empleado"(id_empleado)
+    `);
+
+    await pool.query(`
+      ALTER TABLE "Autolavado_orden"
+      ADD COLUMN IF NOT EXISTS tecnico_asignado_en timestamp with time zone
+    `);
 
   await pool.query(`
     ALTER TABLE "Autolavado_orden"
@@ -1082,10 +1239,15 @@ export async function ensureSchema() {
     ON "Autolavado_orden" (id_usuario, fecha DESC)
   `);
 
-  await pool.query(`
-    CREATE INDEX IF NOT EXISTS "idx_autolavado_orden_tecnico"
-    ON "Autolavado_orden" (id_tecnico_asignado)
-  `);
+    await pool.query(`
+      CREATE INDEX IF NOT EXISTS "idx_autolavado_orden_tecnico"
+      ON "Autolavado_orden" (id_tecnico_asignado)
+    `);
+
+    await pool.query(`
+      CREATE INDEX IF NOT EXISTS "idx_autolavado_orden_tecnico_empleado"
+      ON "Autolavado_orden" (id_empleado_tecnico_asignado)
+    `);
 
   await pool.query(`
     CREATE TABLE IF NOT EXISTS "Reparacion_orden" (
@@ -1120,15 +1282,20 @@ export async function ensureSchema() {
     ADD COLUMN IF NOT EXISTS fecha_diagnostico timestamp with time zone
   `);
 
-  await pool.query(`
-    ALTER TABLE "Reparacion_orden"
-    ADD COLUMN IF NOT EXISTS id_tecnico_asignado integer REFERENCES "Usuario"(id_usuario)
-  `);
+    await pool.query(`
+      ALTER TABLE "Reparacion_orden"
+      ADD COLUMN IF NOT EXISTS id_tecnico_asignado integer REFERENCES "Usuario"(id_usuario)
+    `);
 
-  await pool.query(`
-    ALTER TABLE "Reparacion_orden"
-    ADD COLUMN IF NOT EXISTS tecnico_asignado_en timestamp with time zone
-  `);
+    await pool.query(`
+      ALTER TABLE "Reparacion_orden"
+      ADD COLUMN IF NOT EXISTS id_empleado_tecnico_asignado integer REFERENCES "Empleado"(id_empleado)
+    `);
+
+    await pool.query(`
+      ALTER TABLE "Reparacion_orden"
+      ADD COLUMN IF NOT EXISTS tecnico_asignado_en timestamp with time zone
+    `);
 
   await pool.query(`
     ALTER TABLE "Reparacion_orden"
@@ -1205,10 +1372,15 @@ export async function ensureSchema() {
     ON "Reparacion_orden" (id_usuario, fecha DESC)
   `);
 
-  await pool.query(`
-    CREATE INDEX IF NOT EXISTS "idx_reparacion_orden_tecnico"
-    ON "Reparacion_orden" (id_tecnico_asignado)
-  `);
+    await pool.query(`
+      CREATE INDEX IF NOT EXISTS "idx_reparacion_orden_tecnico"
+      ON "Reparacion_orden" (id_tecnico_asignado)
+    `);
+
+    await pool.query(`
+      CREATE INDEX IF NOT EXISTS "idx_reparacion_orden_tecnico_empleado"
+      ON "Reparacion_orden" (id_empleado_tecnico_asignado)
+    `);
 
   await pool.query(`
     CREATE TABLE IF NOT EXISTS "Reparacion_orden_producto" (

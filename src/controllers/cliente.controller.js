@@ -3,10 +3,13 @@ import * as Cliente from "../models/cliente.model.js";
 const normalizeClientePayload = (body = {}) => ({
   nit: String(body.nit || "").trim() || null,
   nombre: String(body.nombre || "").trim(),
+  tipo_cliente: String(body.tipo_cliente || "NORMAL").trim().toUpperCase() || "NORMAL",
   telefono: String(body.telefono || "").trim() || null,
   correo: String(body.correo || "").trim() || null,
   direccion: String(body.direccion || "").trim() || null,
 });
+
+const TIPOS_CLIENTE_VALIDOS = new Set(["NORMAL", "MAYORISTA"]);
 
 export const listarClientes = async (req, res) => {
   try {
@@ -26,6 +29,10 @@ export const crearCliente = async (req, res) => {
 
     if (!payload.nombre) {
       return res.status(400).json({ error: "nombre es requerido" });
+    }
+
+    if (!TIPOS_CLIENTE_VALIDOS.has(payload.tipo_cliente)) {
+      return res.status(400).json({ error: "tipo_cliente invalido" });
     }
 
     if (await Cliente.existsClienteByNit(payload.nit)) {
@@ -57,6 +64,10 @@ export const actualizarCliente = async (req, res) => {
 
     if (!payload.nombre) {
       return res.status(400).json({ error: "nombre es requerido" });
+    }
+
+    if (!TIPOS_CLIENTE_VALIDOS.has(payload.tipo_cliente)) {
+      return res.status(400).json({ error: "tipo_cliente invalido" });
     }
 
     if (await Cliente.existsClienteByNit(payload.nit, id_cliente)) {

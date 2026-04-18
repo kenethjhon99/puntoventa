@@ -1,8 +1,15 @@
 import { pool } from "../config/db.js";
 
-const normalizeActorId = (actorId) => {
-  const numericActorId = Number(actorId);
-  return Number.isInteger(numericActorId) ? numericActorId : null;
+const normalizePositiveInt = (value) => {
+  const parsed = Number(value);
+  return Number.isInteger(parsed) && parsed > 0 ? parsed : null;
+};
+
+const normalizeActorId = (actorId) => normalizePositiveInt(actorId);
+
+const normalizeRequiredId = (value) => {
+  const parsed = normalizePositiveInt(value);
+  return parsed ?? value;
 };
 
 export const listarUsuarios = async () => {
@@ -53,8 +60,8 @@ export const getUsuarioById = async (id_usuario) => {
   const r = await pool.query(
     `SELECT id_usuario, username, nombre, activo, created_at, updated_at
      FROM "Usuario"
-     WHERE id_usuario = $1`,
-    [id_usuario]
+     WHERE id_usuario = $1::int`,
+    [normalizeRequiredId(id_usuario)]
   );
   return r.rows[0];
 };
@@ -65,10 +72,10 @@ export const actualizarUsuarioBasico = async (id_usuario, { username, nombre }, 
     `UPDATE "Usuario"
      SET username = COALESCE($1, username),
          nombre = COALESCE($2, nombre),
-         updated_by = $3
-     WHERE id_usuario = $4
+         updated_by = $3::int
+     WHERE id_usuario = $4::int
      RETURNING id_usuario, username, nombre, activo, created_at, updated_at`,
-    [username ?? null, nombre ?? null, normalizedActorId, id_usuario]
+    [username ?? null, nombre ?? null, normalizedActorId, normalizeRequiredId(id_usuario)]
   );
   return r.rows[0];
 };
@@ -78,10 +85,10 @@ export const actualizarPasswordHashUsuario = async (id_usuario, password_hash, a
   const r = await pool.query(
     `UPDATE "Usuario"
      SET password_hash = $1,
-         updated_by = $3
-     WHERE id_usuario = $2
+         updated_by = $3::int
+     WHERE id_usuario = $2::int
      RETURNING id_usuario, username, nombre, activo, created_at, updated_at`,
-    [password_hash, id_usuario, normalizedActorId]
+    [password_hash, normalizeRequiredId(id_usuario), normalizedActorId]
   );
   return r.rows[0];
 };
@@ -98,16 +105,16 @@ export const actualizarPersona = async (id_usuario, data, actorId = null) => {
     i++;
   }
 
-  fields.push(`updated_by = $${i}`);
+  fields.push(`updated_by = $${i}::int`);
   values.push(normalizedActorId);
   i++;
 
   const r = await pool.query(
     `UPDATE "Persona"
      SET ${fields.join(", ")}
-     WHERE id_usuario = $${i}
+     WHERE id_usuario = $${i}::int
      RETURNING *`,
-    [...values, id_usuario]
+    [...values, normalizeRequiredId(id_usuario)]
   );
 
   return r.rows[0];
@@ -117,13 +124,13 @@ export const setActivoUsuario = async (id_usuario, activo, actorId = null) => {
   const normalizedActorId = normalizeActorId(actorId);
   const r = await pool.query(
     `UPDATE "Usuario"
-     SET activo = $1,
-         inactivado_en = CASE WHEN $1 = false THEN now() ELSE null END,
-         inactivado_por = CASE WHEN $1 = false THEN $3 ELSE null END,
-         updated_by = $3
-     WHERE id_usuario = $2
+     SET activo = $1::boolean,
+         inactivado_en = CASE WHEN $1::boolean = false THEN now() ELSE null END,
+         inactivado_por = CASE WHEN $1::boolean = false THEN $3::int ELSE null END,
+         updated_by = $3::int
+     WHERE id_usuario = $2::int
      RETURNING id_usuario, username, nombre, activo, created_at, updated_at, inactivado_en, inactivado_por`,
-    [activo, id_usuario, normalizedActorId]
+    [activo, normalizeRequiredId(id_usuario), normalizedActorId]
   );
   return r.rows[0];
 };
@@ -133,9 +140,9 @@ export const asignarRol = async (id_usuario, id_rol, actorId = null) => {
   const existing = await pool.query(
     `SELECT id_usuario, id_rol, COALESCE(activo, true) AS activo
      FROM "Detalle_usuario"
-     WHERE id_usuario = $1 AND id_rol = $2
+     WHERE id_usuario = $1::int AND id_rol = $2::int
      LIMIT 1`,
-    [id_usuario, id_rol]
+    [normalizeRequiredId(id_usuario), normalizeRequiredId(id_rol)]
   );
 
   if (existing.rowCount > 0) {
@@ -148,10 +155,10 @@ export const asignarRol = async (id_usuario, id_rol, actorId = null) => {
        SET activo = true,
            inactivado_en = null,
            inactivado_por = null,
-           updated_by = $3
-       WHERE id_usuario = $1 AND id_rol = $2
+           updated_by = $3::int
+       WHERE id_usuario = $1::int AND id_rol = $2::int
        RETURNING id_usuario, id_rol`,
-      [id_usuario, id_rol, normalizedActorId]
+      [normalizeRequiredId(id_usuario), normalizeRequiredId(id_rol), normalizedActorId]
     );
 
     return reactivated.rows[0];
@@ -159,9 +166,9 @@ export const asignarRol = async (id_usuario, id_rol, actorId = null) => {
 
   const r = await pool.query(
     `INSERT INTO "Detalle_usuario" (id_usuario, id_rol, activo, created_by, updated_by)
-     VALUES ($1, $2, true, $3, $3)
+     VALUES ($1::int, $2::int, true, $3::int, $3::int)
      RETURNING id_usuario, id_rol`,
-    [id_usuario, id_rol, normalizedActorId]
+    [normalizeRequiredId(id_usuario), normalizeRequiredId(id_rol), normalizedActorId]
   );
   return r.rows[0];
 };
@@ -172,13 +179,13 @@ export const quitarRol = async (id_usuario, id_rol, actorId = null) => {
     `UPDATE "Detalle_usuario"
      SET activo = false,
          inactivado_en = now(),
-         inactivado_por = $3,
-         updated_by = $3
-     WHERE id_usuario = $1
-       AND id_rol = $2
+         inactivado_por = $3::int,
+         updated_by = $3::int
+     WHERE id_usuario = $1::int
+       AND id_rol = $2::int
        AND COALESCE(activo, true) = true
      RETURNING id_usuario, id_rol`,
-    [id_usuario, id_rol, normalizedActorId]
+    [normalizeRequiredId(id_usuario), normalizeRequiredId(id_rol), normalizedActorId]
   );
   return r.rows[0];
 };

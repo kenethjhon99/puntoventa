@@ -1,6 +1,10 @@
 import * as Venta from "../models/venta.model.js";
 import { getCajaSesionActiva } from "../models/caja.model.js";
 import { addLocalDates } from "../utils/datetime.js";
+import {
+  normalizeVentaPayload,
+  validateVentaPayload,
+} from "../validators/venta.validator.js";
 
 export const anularDetalleVenta = async (req, res) => {
   try {
@@ -56,20 +60,10 @@ export const anularVentaCompleta = async (req, res) => {
 
 export const crearVenta = async (req, res) => {
   try {
-    const {
-      items,
-      tipo_venta,
-      metodo_pago,
-      id_sucursal,
-      id_cliente,
-      tipo_comprobante,
-      monto_recibido,
-      no_cobrar,
-      no_cobrado_motivo,
-    } = req.body;
-
-    if (!Array.isArray(items) || items.length === 0) {
-      return res.status(400).json({ error: "items es requerido" });
+    const payload = normalizeVentaPayload(req.body);
+    const validationError = validateVentaPayload(payload);
+    if (validationError) {
+      return res.status(400).json({ error: validationError });
     }
 
     const sesionCaja = await getCajaSesionActiva(req.user.id_usuario);
@@ -79,26 +73,20 @@ export const crearVenta = async (req, res) => {
       });
     }
 
-    if (Boolean(no_cobrar)) {
-      const motivoNoCobro = String(no_cobrado_motivo || "").trim();
-      if (!motivoNoCobro) {
-        return res.status(400).json({ error: "Debes indicar el motivo del no cobro" });
-      }
-    }
-
     const venta = await Venta.crearVenta({
       id_usuario: req.user.id_usuario,
-      id_sucursal: Number(id_sucursal || 1),
+      id_sucursal: payload.id_sucursal,
       id_caja_sesion: Number(sesionCaja.id_caja_sesion),
-      id_cliente: id_cliente ? Number(id_cliente) : null,
-      tipo_venta,
-      metodo_pago,
-      tipo_comprobante,
-      monto_recibido,
-      no_cobrar: Boolean(no_cobrar),
-      no_cobrado_motivo: String(no_cobrado_motivo || "").trim() || null,
+      id_cliente: payload.id_cliente,
+      tipo_venta: payload.tipo_venta,
+      metodo_pago: payload.metodo_pago,
+      tipo_comprobante: payload.tipo_comprobante,
+      monto_recibido: payload.monto_recibido,
+      descuento_porcentaje: payload.descuento_porcentaje,
+      no_cobrar: payload.no_cobrar,
+      no_cobrado_motivo: payload.no_cobrado_motivo,
       no_cobrado_autorizado_por: null,
-      items,
+      items: payload.items,
       id_bodega: 1
     });
 

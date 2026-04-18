@@ -20,12 +20,20 @@ export const crearCompra = async ({
   id_proveedor,
   id_sucursal = 1,
   id_bodega = 1,
+  dias_credito = 0,
+  termino_pago,
+  moneda = "GTQ",
   items
 }) => {
   const client = await pool.connect();
 
   try {
     await client.query("BEGIN");
+
+    const diasCreditoNum = Math.max(0, Number(dias_credito) || 0);
+    const terminoPagoFinal = termino_pago
+      ? String(termino_pago).toUpperCase().slice(0, 40)
+      : (diasCreditoNum > 0 ? `CREDITO ${diasCreditoNum} DIAS` : "CONTADO");
 
     // 1) Crear Compra
     const rCompra = await client.query(
@@ -41,7 +49,11 @@ export const crearCompra = async ({
         id_proveedor,
         id_sucursal,
         id_bodega,
-        id_usuario
+        id_usuario,
+        dias_credito,
+        termino_pago,
+        moneda,
+        fecha_limite_pago
       )
       VALUES (
         COALESCE($1::timestamptz, now()),
@@ -55,7 +67,11 @@ export const crearCompra = async ({
         $5,
         $6,
         $7,
-        $8
+        $8,
+        $9,
+        $10,
+        $11,
+        (COALESCE($1::timestamptz, now())::date + ($9 || ' days')::interval)::date
       )
       RETURNING *`,
       [
@@ -66,7 +82,10 @@ export const crearCompra = async ({
         id_proveedor,
         id_sucursal,
         id_bodega,
-        id_usuario
+        id_usuario,
+        diasCreditoNum,
+        terminoPagoFinal,
+        moneda || "GTQ"
       ]
     );
 
@@ -204,7 +223,7 @@ export const listarCompras = async (filters) => {
     params.push(`%${String(no_documento).trim()}%`);
   }
   if (proveedor) {
-    where.push(`COALESCE(p.nombre, '') ILIKE $${i++}`);
+    where.push(`COALESCE(p.nombre_empresa, '') ILIKE $${i++}`);
     params.push(`%${String(proveedor).trim()}%`);
   }
 
@@ -248,7 +267,10 @@ export const listarCompras = async (filters) => {
   const rData = await pool.query(
     `SELECT
         c.*,
-        p.nombre AS proveedor_nombre,
+        p.nombre_empresa AS proveedor_nombre,
+        p.telefono_empresa AS proveedor_telefono_empresa,
+        p.nombre_viajero AS proveedor_nombre_viajero,
+        p.telefono_viajero AS proveedor_telefono_viajero,
         u.username AS usuario_username,
         COALESCE(ds.unidades_anuladas, 0) AS unidades_anuladas,
         COALESCE(ds.detalles_anulados, 0) AS detalles_anulados,
@@ -284,12 +306,23 @@ export const getCompraCompleta = async (id_compra) => {
   const rC = await pool.query(
     `SELECT
         c.*,
-        p.nombre AS proveedor_nombre,
+        p.nit AS proveedor_nit,
+        p.nombre_empresa AS proveedor_nombre,
+        p.telefono_empresa AS proveedor_telefono_empresa,
+        p.nombre_viajero AS proveedor_nombre_viajero,
+        p.telefono_viajero AS proveedor_telefono_viajero,
+        p.correo AS proveedor_correo,
+        p.direccion AS proveedor_direccion,
         u.username AS usuario_username,
-        u.nombre AS usuario_nombre
+        u.nombre AS usuario_nombre,
+        s.nombre AS sucursal_nombre,
+        s.direccion AS sucursal_direccion,
+        s.telefono AS sucursal_telefono,
+        s.correo AS sucursal_correo
      FROM "Compra" c
      JOIN "Proveedor" p ON p.id_proveedor = c.id_proveedor
      JOIN "Usuario" u ON u.id_usuario = c.id_usuario
+     LEFT JOIN "Sucursal" s ON s.id_sucursal = c.id_sucursal
      WHERE c.id_compra = $1`,
     [id_compra]
   );

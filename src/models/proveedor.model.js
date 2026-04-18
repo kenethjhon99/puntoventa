@@ -1,11 +1,29 @@
 import { pool } from "../config/db.js";
 
+const BASE_COLUMNS = `
+  id_proveedor,
+  nombre_empresa,
+  telefono_empresa,
+  nombre_viajero,
+  telefono_viajero,
+  nit,
+  correo,
+  direccion,
+  estado,
+  created_at,
+  updated_at,
+  created_by,
+  updated_by,
+  inactivado_en,
+  inactivado_por
+`;
+
 export const getProveedoresActivos = async () => {
   const result = await pool.query(`
-    SELECT id_proveedor, nombre, nit, telefono, correo, direccion, estado, created_at, updated_at, created_by, updated_by, inactivado_en, inactivado_por
+    SELECT ${BASE_COLUMNS}
     FROM "Proveedor"
     WHERE estado = true
-    ORDER BY nombre ASC
+    ORDER BY nombre_empresa ASC
   `);
 
   return result.rows;
@@ -14,11 +32,10 @@ export const getProveedoresActivos = async () => {
 export const getProveedores = async ({ incluirInactivos = false } = {}) => {
   const result = await pool.query(
     `
-      SELECT id_proveedor, nombre, nit, telefono, correo, direccion, estado, created_at
-           , updated_at, created_by, updated_by, inactivado_en, inactivado_por
+      SELECT ${BASE_COLUMNS}
       FROM "Proveedor"
       WHERE $1::boolean = true OR estado = true
-      ORDER BY estado DESC, nombre ASC
+      ORDER BY estado DESC, nombre_empresa ASC
     `,
     [incluirInactivos]
   );
@@ -42,20 +59,36 @@ export const existsProveedorByNit = async (nit, excludeId = null) => {
 };
 
 export const createProveedor = async ({
-  nombre,
+  nombre_empresa,
+  telefono_empresa = null,
+  nombre_viajero = null,
+  telefono_viajero = null,
   nit,
-  telefono = null,
   correo = null,
   direccion = null,
   actorId = null,
 }) => {
   const result = await pool.query(
     `
-      INSERT INTO "Proveedor" (nombre, nit, telefono, correo, direccion, estado, created_by, updated_by)
-      VALUES ($1, $2, $3, $4, $5, true, $6, $6)
-      RETURNING id_proveedor, nombre, nit, telefono, correo, direccion, estado, created_at, updated_at, created_by, updated_by, inactivado_en, inactivado_por
+      INSERT INTO "Proveedor" (
+        nombre_empresa, telefono_empresa,
+        nombre_viajero, telefono_viajero,
+        nit, correo, direccion,
+        estado, created_by, updated_by
+      )
+      VALUES ($1, $2, $3, $4, $5, $6, $7, true, $8, $8)
+      RETURNING ${BASE_COLUMNS}
     `,
-    [nombre, nit, telefono, correo, direccion, actorId]
+    [
+      nombre_empresa,
+      telefono_empresa,
+      nombre_viajero,
+      telefono_viajero,
+      nit,
+      correo,
+      direccion,
+      actorId,
+    ]
   );
 
   return result.rows[0];
@@ -63,22 +96,42 @@ export const createProveedor = async ({
 
 export const updateProveedor = async (
   id_proveedor,
-  { nombre, nit, telefono = null, correo = null, direccion = null },
+  {
+    nombre_empresa,
+    telefono_empresa = null,
+    nombre_viajero = null,
+    telefono_viajero = null,
+    nit,
+    correo = null,
+    direccion = null,
+  },
   actorId = null
 ) => {
   const result = await pool.query(
     `
       UPDATE "Proveedor"
-      SET nombre = $1,
-          nit = $2,
-          telefono = $3,
-          correo = $4,
-          direccion = $5,
-          updated_by = $6
-      WHERE id_proveedor = $7
-      RETURNING id_proveedor, nombre, nit, telefono, correo, direccion, estado, created_at, updated_at, created_by, updated_by, inactivado_en, inactivado_por
+      SET nombre_empresa   = $1,
+          telefono_empresa = $2,
+          nombre_viajero   = $3,
+          telefono_viajero = $4,
+          nit              = $5,
+          correo           = $6,
+          direccion        = $7,
+          updated_by       = $8
+      WHERE id_proveedor = $9
+      RETURNING ${BASE_COLUMNS}
     `,
-    [nombre, nit, telefono, correo, direccion, actorId, id_proveedor]
+    [
+      nombre_empresa,
+      telefono_empresa,
+      nombre_viajero,
+      telefono_viajero,
+      nit,
+      correo,
+      direccion,
+      actorId,
+      id_proveedor,
+    ]
   );
 
   return result.rows[0];
@@ -94,7 +147,7 @@ export const desactivarProveedor = async (id_proveedor, actorId = null) => {
           updated_by = $2
       WHERE id_proveedor = $1
         AND estado = true
-      RETURNING id_proveedor, nombre, nit, telefono, correo, direccion, estado, created_at, updated_at, created_by, updated_by, inactivado_en, inactivado_por
+      RETURNING ${BASE_COLUMNS}
     `,
     [id_proveedor, actorId]
   );

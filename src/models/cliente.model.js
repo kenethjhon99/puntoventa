@@ -14,6 +14,7 @@ export const getClientes = async ({ incluirInactivos = false } = {}) => {
         codigo,
         nit,
         nombre,
+        UPPER(COALESCE(tipo_cliente, 'NORMAL')) AS tipo_cliente,
         telefono,
         correo,
         direccion,
@@ -69,6 +70,7 @@ export const existsClienteByNit = async (nit, excludeId = null) => {
 export const createCliente = async ({
   nit = null,
   nombre,
+  tipo_cliente = "NORMAL",
   telefono = null,
   correo = null,
   direccion = null,
@@ -92,13 +94,14 @@ export const createCliente = async ({
 
     const result = await client.query(
       `
-        INSERT INTO "Clientes" (codigo, nit, nombre, telefono, correo, direccion, estado, created_by, updated_by)
-        VALUES ($1, $2, $3, $4, $5, $6, true, $7, $7)
+        INSERT INTO "Clientes" (codigo, nit, nombre, tipo_cliente, telefono, correo, direccion, estado, created_by, updated_by)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, true, $8, $8)
         RETURNING
           "Id_clientes" AS id_cliente,
           codigo,
           nit,
           nombre,
+          UPPER(COALESCE(tipo_cliente, 'NORMAL')) AS tipo_cliente,
           telefono,
           correo,
           direccion,
@@ -110,7 +113,7 @@ export const createCliente = async ({
           inactivado_en,
           inactivado_por
       `,
-      [codigo, nit, nombre, telefono, correo, direccion, actorId]
+      [codigo, nit, nombre, tipo_cliente, telefono, correo, direccion, actorId]
     );
 
     await client.query("COMMIT");
@@ -125,7 +128,14 @@ export const createCliente = async ({
 
 export const updateCliente = async (
   id_cliente,
-  { nit = null, nombre, telefono = null, correo = null, direccion = null },
+  {
+    nit = null,
+    nombre,
+    tipo_cliente = "NORMAL",
+    telefono = null,
+    correo = null,
+    direccion = null,
+  },
   actorId = null
 ) => {
   const result = await pool.query(
@@ -133,16 +143,18 @@ export const updateCliente = async (
       UPDATE "Clientes"
       SET nit = $1,
           nombre = $2,
-          telefono = $3,
-          correo = $4,
-          direccion = $5,
-          updated_by = $6
-      WHERE "Id_clientes" = $7
+          tipo_cliente = $3,
+          telefono = $4,
+          correo = $5,
+          direccion = $6,
+          updated_by = $7
+      WHERE "Id_clientes" = $8
       RETURNING
         "Id_clientes" AS id_cliente,
         codigo,
         nit,
         nombre,
+        UPPER(COALESCE(tipo_cliente, 'NORMAL')) AS tipo_cliente,
         telefono,
         correo,
         direccion,
@@ -154,7 +166,7 @@ export const updateCliente = async (
         inactivado_en,
         inactivado_por
     `,
-    [nit, nombre, telefono, correo, direccion, actorId, id_cliente]
+    [nit, nombre, tipo_cliente, telefono, correo, direccion, actorId, id_cliente]
   );
 
   return result.rows[0];
@@ -175,6 +187,7 @@ export const desactivarCliente = async (id_cliente, actorId = null) => {
         codigo,
         nit,
         nombre,
+        UPPER(COALESCE(tipo_cliente, 'NORMAL')) AS tipo_cliente,
         telefono,
         correo,
         direccion,

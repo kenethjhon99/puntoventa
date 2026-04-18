@@ -1,0 +1,116 @@
+{
+  "info": {
+    "name": "Ventas - Descuento sobre ganancia",
+    "_postman_id": "ab72fc0e-95f0-470e-aeb8-8fc1ea77c3f7",
+    "description": "Pruebas para ventas con descuento por porcentaje aplicado solo sobre la ganancia, nunca por debajo del costo.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "http://localhost:3000/api"
+    },
+    {
+      "key": "token",
+      "value": ""
+    },
+    {
+      "key": "clienteId",
+      "value": "1"
+    },
+    {
+      "key": "productoId",
+      "value": "1"
+    }
+  ],
+  "item": [
+    {
+      "name": "Crear venta con descuento 20% sobre ganancia",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{token}}",
+            "type": "text"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json",
+            "type": "text"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"tipo_venta\": \"CONTADO\",\n  \"tipo_comprobante\": \"TICKET\",\n  \"metodo_pago\": \"EFECTIVO\",\n  \"monto_recibido\": 500,\n  \"id_sucursal\": 1,\n  \"id_cliente\": {{clienteId}},\n  \"descuento_porcentaje\": 20,\n  \"items\": [\n    {\n      \"id_producto\": {{productoId}},\n      \"cantidad\": 1,\n      \"precio_venta\": 99999\n    }\n  ]\n}"
+        },
+        "url": {
+          "raw": "{{baseUrl}}/ventas",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "ventas"
+          ]
+        },
+        "description": "El precio enviado por frontend se ignora. El backend recalcula el descuento solo sobre la ganancia usando los precios reales de la base."
+      }
+    },
+    {
+      "name": "Crear venta sin cliente con descuento (debe fallar)",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{token}}",
+            "type": "text"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json",
+            "type": "text"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"tipo_venta\": \"CONTADO\",\n  \"tipo_comprobante\": \"TICKET\",\n  \"metodo_pago\": \"EFECTIVO\",\n  \"monto_recibido\": 500,\n  \"id_sucursal\": 1,\n  \"descuento_porcentaje\": 20,\n  \"items\": [\n    {\n      \"id_producto\": {{productoId}},\n      \"cantidad\": 1,\n      \"precio_venta\": 99999\n    }\n  ]\n}"
+        },
+        "url": {
+          "raw": "{{baseUrl}}/ventas",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "ventas"
+          ]
+        }
+      }
+    },
+    {
+      "name": "Obtener detalle completo de venta",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{token}}",
+            "type": "text"
+          }
+        ],
+        "url": {
+          "raw": "{{baseUrl}}/ventas/1/completa",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "ventas",
+            "1",
+            "completa"
+          ]
+        },
+        "description": "Revisa descuento_porcentaje, descuento_total y los valores de detalle calculados por backend."
+      }
+    }
+  ]
+}

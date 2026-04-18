@@ -1,4 +1,8 @@
 import * as Proveedor from "../models/proveedor.model.js";
+import {
+  normalizeProveedorPayload,
+  validateProveedorPayload,
+} from "../validators/proveedor.validator.js";
 
 export const listarProveedores = async (req, res) => {
   try {
@@ -13,31 +17,19 @@ export const listarProveedores = async (req, res) => {
 
 export const crearProveedor = async (req, res) => {
   try {
-    const nombre = String(req.body?.nombre || "").trim();
-    const nit = String(req.body?.nit || "").trim();
-    const telefono = String(req.body?.telefono || "").trim() || null;
-    const correo = String(req.body?.correo || "").trim() || null;
-    const direccion = String(req.body?.direccion || "").trim() || null;
-
-    if (!nombre) {
-      return res.status(400).json({ error: "nombre es requerido" });
+    const payload = normalizeProveedorPayload(req.body);
+    const error = validateProveedorPayload(payload);
+    if (error) {
+      return res.status(400).json({ error });
     }
 
-    if (!nit) {
-      return res.status(400).json({ error: "nit es requerido" });
-    }
-
-    const nitExiste = await Proveedor.existsProveedorByNit(nit);
+    const nitExiste = await Proveedor.existsProveedorByNit(payload.nit);
     if (nitExiste) {
       return res.status(409).json({ error: "Ya existe un proveedor con ese NIT" });
     }
 
     const proveedor = await Proveedor.createProveedor({
-      nombre,
-      nit,
-      telefono,
-      correo,
-      direccion,
+      ...payload,
       actorId: req.user?.id_usuario ?? null,
     });
 
@@ -54,36 +46,27 @@ export const crearProveedor = async (req, res) => {
 export const actualizarProveedor = async (req, res) => {
   try {
     const id_proveedor = Number(req.params.id);
-    const nombre = String(req.body?.nombre || "").trim();
-    const nit = String(req.body?.nit || "").trim();
-    const telefono = String(req.body?.telefono || "").trim() || null;
-    const correo = String(req.body?.correo || "").trim() || null;
-    const direccion = String(req.body?.direccion || "").trim() || null;
 
     if (!Number.isInteger(id_proveedor) || id_proveedor <= 0) {
       return res.status(400).json({ error: "id_proveedor invalido" });
     }
 
-    if (!nombre) {
-      return res.status(400).json({ error: "nombre es requerido" });
+    const payload = normalizeProveedorPayload(req.body);
+    const error = validateProveedorPayload(payload);
+    if (error) {
+      return res.status(400).json({ error });
     }
 
-    if (!nit) {
-      return res.status(400).json({ error: "nit es requerido" });
-    }
-
-    const nitExiste = await Proveedor.existsProveedorByNit(nit, id_proveedor);
+    const nitExiste = await Proveedor.existsProveedorByNit(payload.nit, id_proveedor);
     if (nitExiste) {
       return res.status(409).json({ error: "Ya existe un proveedor con ese NIT" });
     }
 
-    const proveedor = await Proveedor.updateProveedor(id_proveedor, {
-      nombre,
-      nit,
-      telefono,
-      correo,
-      direccion,
-    }, req.user?.id_usuario ?? null);
+    const proveedor = await Proveedor.updateProveedor(
+      id_proveedor,
+      payload,
+      req.user?.id_usuario ?? null
+    );
 
     if (!proveedor) {
       return res.status(404).json({ error: "Proveedor no encontrado" });

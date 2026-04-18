@@ -15,6 +15,7 @@ import proveedorRouter from "./routes/proveedor.route.js";
 import clienteRouter from "./routes/cliente.route.js";
 import cajaRouter from "./routes/caja.route.js";
 import servicioRouter from "./routes/servicio.route.js";
+import empleadoRouter from "./routes/empleado.route.js";
 
 const parseAllowedOrigins = () => {
   const envOrigins = [
@@ -73,6 +74,7 @@ app.use("/api/reportes", reporteRouter);
 app.use("/api/compras", compraRouter);
 app.use("/api/proveedores", proveedorRouter);
 app.use("/api/clientes", clienteRouter);
+app.use("/api/empleados", empleadoRouter);
 app.use("/api/caja", cajaRouter);
 app.use("/api/servicios", servicioRouter);
 
