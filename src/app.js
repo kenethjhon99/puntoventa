@@ -16,6 +16,7 @@ import clienteRouter from "./routes/cliente.route.js";
 import cajaRouter from "./routes/caja.route.js";
 import servicioRouter from "./routes/servicio.route.js";
 import empleadoRouter from "./routes/empleado.route.js";
+import trasladoRouter from "./routes/traslado.route.js";
 
 const parseAllowedOrigins = () => {
   const envOrigins = [
@@ -77,6 +78,7 @@ app.use("/api/clientes", clienteRouter);
 app.use("/api/empleados", empleadoRouter);
 app.use("/api/caja", cajaRouter);
 app.use("/api/servicios", servicioRouter);
+app.use("/api/traslados", trasladoRouter);
 
 app.get("/api/health", async (req, res) => {
   const r = await pool.query("SELECT NOW() AS ahora");
