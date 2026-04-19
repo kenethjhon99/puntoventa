@@ -5,23 +5,26 @@ const NIT_RE = /^(CF|[0-9]{6,12}(-?[0-9Kk])?)$/;
 const norm = (value) => String(value ?? "").trim();
 const normOrNull = (value) => norm(value) || null;
 
-export const normalizeProveedorPayload = (body = {}) => ({
-  nombre_empresa: norm(body.nombre_empresa),
-  telefono_empresa: normOrNull(body.telefono_empresa),
-  nombre_viajero: normOrNull(body.nombre_viajero),
-  telefono_viajero: normOrNull(body.telefono_viajero),
-  nit: norm(body.nit).toUpperCase(),
-  correo: normOrNull(body.correo),
-  direccion: normOrNull(body.direccion),
-});
+export const normalizeProveedorPayload = (body = {}) => {
+  const nombre = norm(body.nombre ?? body.nombre_empresa);
+  const telefono = normOrNull(body.telefono ?? body.telefono_empresa);
+
+  return {
+    nombre,
+    telefono,
+    nit: norm(body.nit).toUpperCase(),
+    correo: normOrNull(body.correo),
+    direccion: normOrNull(body.direccion),
+  };
+};
 
 export const validateProveedorPayload = (payload) => {
-  if (!payload.nombre_empresa) {
-    return "nombre_empresa es requerido";
+  if (!payload.nombre) {
+    return "nombre es requerido";
   }
 
-  if (payload.nombre_empresa.length > 100) {
-    return "nombre_empresa no puede exceder 100 caracteres";
+  if (payload.nombre.length > 100) {
+    return "nombre no puede exceder 100 caracteres";
   }
 
   if (!payload.nit) {
@@ -32,16 +35,8 @@ export const validateProveedorPayload = (payload) => {
     return "nit invalido (use CF o formato 1234567-8)";
   }
 
-  if (payload.telefono_empresa && !TELEFONO_RE.test(payload.telefono_empresa)) {
-    return "telefono_empresa invalido";
-  }
-
-  if (payload.telefono_viajero && !TELEFONO_RE.test(payload.telefono_viajero)) {
-    return "telefono_viajero invalido";
-  }
-
-  if (payload.nombre_viajero && payload.nombre_viajero.length > 100) {
-    return "nombre_viajero no puede exceder 100 caracteres";
+  if (payload.telefono && !TELEFONO_RE.test(payload.telefono)) {
+    return "telefono invalido";
   }
 
   if (payload.correo && !CORREO_RE.test(payload.correo)) {

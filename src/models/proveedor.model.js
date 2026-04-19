@@ -2,10 +2,8 @@ import { pool } from "../config/db.js";
 
 const BASE_COLUMNS = `
   id_proveedor,
-  nombre_empresa,
-  telefono_empresa,
-  nombre_viajero,
-  telefono_viajero,
+  nombre,
+  telefono,
   nit,
   correo,
   direccion,
@@ -18,12 +16,20 @@ const BASE_COLUMNS = `
   inactivado_por
 `;
 
+const SELECT_COLUMNS = `
+  ${BASE_COLUMNS},
+  nombre AS nombre_empresa,
+  telefono AS telefono_empresa,
+  NULL::text AS nombre_viajero,
+  NULL::text AS telefono_viajero
+`;
+
 export const getProveedoresActivos = async () => {
   const result = await pool.query(`
-    SELECT ${BASE_COLUMNS}
+    SELECT ${SELECT_COLUMNS}
     FROM "Proveedor"
     WHERE estado = true
-    ORDER BY nombre_empresa ASC
+    ORDER BY nombre ASC
   `);
 
   return result.rows;
@@ -32,10 +38,10 @@ export const getProveedoresActivos = async () => {
 export const getProveedores = async ({ incluirInactivos = false } = {}) => {
   const result = await pool.query(
     `
-      SELECT ${BASE_COLUMNS}
+      SELECT ${SELECT_COLUMNS}
       FROM "Proveedor"
       WHERE $1::boolean = true OR estado = true
-      ORDER BY estado DESC, nombre_empresa ASC
+      ORDER BY estado DESC, nombre ASC
     `,
     [incluirInactivos]
   );
@@ -59,10 +65,8 @@ export const existsProveedorByNit = async (nit, excludeId = null) => {
 };
 
 export const createProveedor = async ({
-  nombre_empresa,
-  telefono_empresa = null,
-  nombre_viajero = null,
-  telefono_viajero = null,
+  nombre,
+  telefono = null,
   nit,
   correo = null,
   direccion = null,
@@ -71,19 +75,16 @@ export const createProveedor = async ({
   const result = await pool.query(
     `
       INSERT INTO "Proveedor" (
-        nombre_empresa, telefono_empresa,
-        nombre_viajero, telefono_viajero,
+        nombre, telefono,
         nit, correo, direccion,
         estado, created_by, updated_by
       )
-      VALUES ($1, $2, $3, $4, $5, $6, $7, true, $8, $8)
-      RETURNING ${BASE_COLUMNS}
+      VALUES ($1, $2, $3, $4, $5, true, $6, $6)
+      RETURNING ${SELECT_COLUMNS}
     `,
     [
-      nombre_empresa,
-      telefono_empresa,
-      nombre_viajero,
-      telefono_viajero,
+      nombre,
+      telefono,
       nit,
       correo,
       direccion,
@@ -97,10 +98,8 @@ export const createProveedor = async ({
 export const updateProveedor = async (
   id_proveedor,
   {
-    nombre_empresa,
-    telefono_empresa = null,
-    nombre_viajero = null,
-    telefono_viajero = null,
+    nombre,
+    telefono = null,
     nit,
     correo = null,
     direccion = null,
@@ -110,22 +109,18 @@ export const updateProveedor = async (
   const result = await pool.query(
     `
       UPDATE "Proveedor"
-      SET nombre_empresa   = $1,
-          telefono_empresa = $2,
-          nombre_viajero   = $3,
-          telefono_viajero = $4,
-          nit              = $5,
-          correo           = $6,
-          direccion        = $7,
-          updated_by       = $8
-      WHERE id_proveedor = $9
-      RETURNING ${BASE_COLUMNS}
+      SET nombre     = $1,
+          telefono   = $2,
+          nit        = $3,
+          correo     = $4,
+          direccion  = $5,
+          updated_by = $6
+      WHERE id_proveedor = $7
+      RETURNING ${SELECT_COLUMNS}
     `,
     [
-      nombre_empresa,
-      telefono_empresa,
-      nombre_viajero,
-      telefono_viajero,
+      nombre,
+      telefono,
       nit,
       correo,
       direccion,
@@ -143,11 +138,11 @@ export const desactivarProveedor = async (id_proveedor, actorId = null) => {
       UPDATE "Proveedor"
       SET estado = false,
           inactivado_en = now(),
-          inactivado_por = $2,
-          updated_by = $2
+          inactivado_por = $2::int,
+          updated_by = $2::int
       WHERE id_proveedor = $1
         AND estado = true
-      RETURNING ${BASE_COLUMNS}
+      RETURNING ${SELECT_COLUMNS}
     `,
     [id_proveedor, actorId]
   );

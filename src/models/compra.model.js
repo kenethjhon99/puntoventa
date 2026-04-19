@@ -223,7 +223,7 @@ export const listarCompras = async (filters) => {
     params.push(`%${String(no_documento).trim()}%`);
   }
   if (proveedor) {
-    where.push(`COALESCE(p.nombre_empresa, '') ILIKE $${i++}`);
+    where.push(`COALESCE(p.nombre, '') ILIKE $${i++}`);
     params.push(`%${String(proveedor).trim()}%`);
   }
 
@@ -267,10 +267,11 @@ export const listarCompras = async (filters) => {
   const rData = await pool.query(
     `SELECT
         c.*,
-        p.nombre_empresa AS proveedor_nombre,
-        p.telefono_empresa AS proveedor_telefono_empresa,
-        p.nombre_viajero AS proveedor_nombre_viajero,
-        p.telefono_viajero AS proveedor_telefono_viajero,
+        p.nombre AS proveedor_nombre,
+        p.telefono AS proveedor_telefono,
+        p.telefono AS proveedor_telefono_empresa,
+        NULL::text AS proveedor_nombre_viajero,
+        NULL::text AS proveedor_telefono_viajero,
         u.username AS usuario_username,
         COALESCE(ds.unidades_anuladas, 0) AS unidades_anuladas,
         COALESCE(ds.detalles_anulados, 0) AS detalles_anulados,
@@ -307,10 +308,11 @@ export const getCompraCompleta = async (id_compra) => {
     `SELECT
         c.*,
         p.nit AS proveedor_nit,
-        p.nombre_empresa AS proveedor_nombre,
-        p.telefono_empresa AS proveedor_telefono_empresa,
-        p.nombre_viajero AS proveedor_nombre_viajero,
-        p.telefono_viajero AS proveedor_telefono_viajero,
+        p.nombre AS proveedor_nombre,
+        p.telefono AS proveedor_telefono,
+        p.telefono AS proveedor_telefono_empresa,
+        NULL::text AS proveedor_nombre_viajero,
+        NULL::text AS proveedor_telefono_viajero,
         p.correo AS proveedor_correo,
         p.direccion AS proveedor_direccion,
         u.username AS usuario_username,

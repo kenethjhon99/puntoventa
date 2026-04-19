@@ -25,7 +25,7 @@ const AUDIT_ENTITIES = {
     alias: "p",
     idColumn: "id_proveedor",
     codeExpr: `COALESCE(p.nit, '')`,
-    nameExpr: `COALESCE(p.nombre_empresa, 'Sin nombre')`,
+    nameExpr: `COALESCE(p.nombre, 'Sin nombre')`,
     detailExpr: `COALESCE(p.correo, '')`,
     activeExpr: `COALESCE(p.estado, true)`,
     fromSql: `"Proveedor" p`,
