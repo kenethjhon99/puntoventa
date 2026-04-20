@@ -399,6 +399,229 @@ export async function ensureSchema() {
   `);
 
   await pool.query(`
+    DO $$
+    DECLARE
+      v_sucursal integer;
+      v_general integer;
+      v_taller integer;
+    BEGIN
+      SELECT COALESCE(MIN("Id_sucursal"), 1)
+      INTO v_sucursal
+      FROM "Sucursal";
+
+      IF NOT EXISTS (
+        SELECT 1
+        FROM "Bodega"
+        WHERE UPPER(BTRIM("Nombre")) = 'GENERAL'
+      ) AND (
+        SELECT COUNT(*)
+        FROM "Bodega"
+      ) = 1 THEN
+        UPDATE "Bodega"
+        SET "Nombre" = 'GENERAL'
+        WHERE id_bodega = (
+          SELECT id_bodega
+          FROM "Bodega"
+          ORDER BY id_bodega
+          LIMIT 1
+        );
+      END IF;
+
+      IF EXISTS (
+        SELECT 1
+        FROM "Bodega"
+        WHERE UPPER(BTRIM("Nombre")) = 'TIENDA'
+      ) AND NOT EXISTS (
+        SELECT 1
+        FROM "Bodega"
+        WHERE UPPER(BTRIM("Nombre")) = 'PRODUCTOS_TALLER'
+      ) THEN
+        UPDATE "Bodega"
+        SET "Nombre" = 'PRODUCTOS_TALLER'
+        WHERE UPPER(BTRIM("Nombre")) = 'TIENDA';
+      END IF;
+
+      IF NOT EXISTS (
+        SELECT 1
+        FROM "Bodega"
+        WHERE UPPER(BTRIM("Nombre")) = 'GENERAL'
+      ) THEN
+        INSERT INTO "Bodega"("Nombre", id_sucursal)
+        VALUES ('GENERAL', v_sucursal);
+      END IF;
+
+      IF NOT EXISTS (
+        SELECT 1
+        FROM "Bodega"
+        WHERE UPPER(BTRIM("Nombre")) = 'PRODUCTOS_TALLER'
+      ) THEN
+        INSERT INTO "Bodega"("Nombre", id_sucursal)
+        VALUES ('PRODUCTOS_TALLER', v_sucursal);
+      END IF;
+
+      SELECT id_bodega
+      INTO v_general
+      FROM "Bodega"
+      WHERE UPPER(BTRIM("Nombre")) = 'GENERAL'
+      ORDER BY id_bodega
+      LIMIT 1;
+
+      SELECT id_bodega
+      INTO v_taller
+      FROM "Bodega"
+      WHERE UPPER(BTRIM("Nombre")) = 'PRODUCTOS_TALLER'
+      ORDER BY id_bodega
+      LIMIT 1;
+
+      IF v_general IS NOT NULL AND v_taller IS NOT NULL THEN
+        UPDATE "Stock_producto" sp
+        SET id_bodega = v_taller,
+            updated_at = now()
+        FROM "Producto" p
+        WHERE sp.id_producto = p.id_producto
+          AND COALESCE(p.modulo_origen, 'GENERAL') = 'SERVICIOS'
+          AND sp.id_bodega = v_general
+          AND NOT EXISTS (
+            SELECT 1
+            FROM "Stock_producto" existing
+            WHERE existing.id_producto = sp.id_producto
+              AND existing.id_bodega = v_taller
+              AND existing.id_stock <> sp.id_stock
+          );
+      END IF;
+    END $$;
+  `);
+
+  await pool.query(`
+    DO $$
+    BEGIN
+      IF EXISTS (
+        SELECT 1
+        FROM information_schema.tables
+        WHERE table_schema = 'public'
+          AND table_name = 'Traslado'
+      ) AND NOT EXISTS (
+        SELECT 1
+        FROM information_schema.tables
+        WHERE table_schema = 'public'
+          AND table_name = 'traslado'
+      ) THEN
+        ALTER TABLE "Traslado" RENAME TO traslado;
+      END IF;
+
+      IF EXISTS (
+        SELECT 1
+        FROM information_schema.tables
+        WHERE table_schema = 'public'
+          AND table_name = 'Traslado_detalle'
+      ) AND NOT EXISTS (
+        SELECT 1
+        FROM information_schema.tables
+        WHERE table_schema = 'public'
+          AND table_name = 'traslado_detalle'
+      ) THEN
+        ALTER TABLE "Traslado_detalle" RENAME TO traslado_detalle;
+      END IF;
+    END $$;
+  `);
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS traslado (
+      id_traslado serial PRIMARY KEY,
+      fecha timestamp with time zone NOT NULL DEFAULT now(),
+      id_bodega_origen integer NOT NULL REFERENCES "Bodega"(id_bodega),
+      id_bodega_destino integer NOT NULL REFERENCES "Bodega"(id_bodega),
+      id_sucursal_origen integer REFERENCES "Sucursal"("Id_sucursal"),
+      id_sucursal_destino integer REFERENCES "Sucursal"("Id_sucursal"),
+      id_usuario integer NOT NULL REFERENCES "Usuario"(id_usuario),
+      id_usuario_recibe integer REFERENCES "Usuario"(id_usuario),
+      modulo_origen character varying(20) NOT NULL DEFAULT 'GENERAL',
+      modulo_destino character varying(20) NOT NULL DEFAULT 'SERVICIOS',
+      estado character varying(20) NOT NULL DEFAULT 'RECIBIDO',
+      motivo character varying(200),
+      observaciones character varying(500),
+      total_items integer NOT NULL DEFAULT 0,
+      total_unidades integer NOT NULL DEFAULT 0,
+      total_valorizado numeric(12,2) NOT NULL DEFAULT 0,
+      anulada_en timestamp with time zone,
+      anulada_por integer REFERENCES "Usuario"(id_usuario),
+      motivo_anulacion character varying(200),
+      CONSTRAINT chk_traslado_estado
+        CHECK (estado IN ('EN_TRANSITO', 'RECIBIDO', 'ANULADO')),
+      CONSTRAINT chk_traslado_modulo_origen
+        CHECK (modulo_origen IN ('GENERAL', 'SERVICIOS')),
+      CONSTRAINT chk_traslado_modulo_destino
+        CHECK (modulo_destino IN ('GENERAL', 'SERVICIOS'))
+    )
+  `);
+
+  await ensureAuditColumnsForTable("traslado");
+  await ensureUpdatedAtTriggerForTable("traslado");
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS traslado_detalle (
+      id_traslado_detalle serial PRIMARY KEY,
+      id_traslado integer NOT NULL REFERENCES traslado(id_traslado) ON DELETE CASCADE,
+      id_producto integer NOT NULL REFERENCES "Producto"(id_producto),
+      cantidad integer NOT NULL,
+      costo_unitario numeric(12,2) NOT NULL DEFAULT 0,
+      subtotal numeric(12,2) NOT NULL DEFAULT 0,
+      CONSTRAINT chk_traslado_detalle_cantidad
+        CHECK (cantidad > 0)
+    )
+  `);
+
+  await ensureAuditColumnsForTable("traslado_detalle");
+  await ensureUpdatedAtTriggerForTable("traslado_detalle");
+
+  await pool.query(`
+    ALTER TABLE "Movimiento_stock"
+    ADD COLUMN IF NOT EXISTS id_traslado integer
+  `);
+
+  await pool.query(`
+    DO $$
+    BEGIN
+      IF NOT EXISTS (
+        SELECT 1
+        FROM information_schema.table_constraints
+        WHERE table_schema = 'public'
+          AND table_name = 'Movimiento_stock'
+          AND constraint_name = 'fk_movimiento_stock_traslado'
+      ) THEN
+        ALTER TABLE "Movimiento_stock"
+        ADD CONSTRAINT fk_movimiento_stock_traslado
+        FOREIGN KEY (id_traslado) REFERENCES traslado(id_traslado);
+      END IF;
+    END $$;
+  `);
+
+  await pool.query(`
+    CREATE INDEX IF NOT EXISTS "idx_traslado_fecha"
+    ON traslado (fecha DESC)
+  `);
+
+  await pool.query(`
+    CREATE INDEX IF NOT EXISTS "idx_traslado_origen_destino"
+    ON traslado (id_bodega_origen, id_bodega_destino)
+  `);
+
+  await pool.query(`
+    CREATE INDEX IF NOT EXISTS "idx_traslado_modulos"
+    ON traslado (modulo_origen, modulo_destino)
+  `);
+
+  await pool.query(`
+    CREATE INDEX IF NOT EXISTS "idx_traslado_detalle_traslado"
+    ON traslado_detalle (id_traslado)
+  `);
+
+  await pool.query(`
+    CREATE INDEX IF NOT EXISTS "idx_movimiento_stock_traslado"
+    ON "Movimiento_stock" (id_traslado)
+  `);
+
+  await pool.query(`
     CREATE UNIQUE INDEX IF NOT EXISTS "clientes_nit_unique"
     ON "Clientes" (nit)
     WHERE nit IS NOT NULL

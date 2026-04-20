@@ -3,6 +3,40 @@ import { pool } from "../config/db.js";
 const round2 = (n) => Number((Number(n) || 0).toFixed(2));
 
 const folioSql = `('T-' || LPAD(t.id_traslado::text, 5, '0'))`;
+const GENERAL_BUCKET = "GENERAL";
+const SERVICIOS_BUCKET = "SERVICIOS";
+
+const normalizeBucketName = (value) =>
+  String(value || "")
+    .trim()
+    .toUpperCase()
+    .replace(/\s+/g, "_");
+
+const getBucketFromBodegaName = (nombre) => {
+  const normalized = normalizeBucketName(nombre);
+  if (normalized === "GENERAL" || normalized === "BODEGA1") return GENERAL_BUCKET;
+  if (["PRODUCTOS_TALLER", "TIENDA", "SERVICIOS", "TALLER"].includes(normalized)) {
+    return SERVICIOS_BUCKET;
+  }
+  return null;
+};
+
+const getBucketLabel = (bucket) =>
+  bucket === SERVICIOS_BUCKET ? "Productos Taller" : "General";
+
+const getBucketByNameOrFallback = (bucketValue, bodegaNombre, fallback = GENERAL_BUCKET) =>
+  normalizeBucketName(bucketValue) ||
+  getBucketFromBodegaName(bodegaNombre) ||
+  fallback;
+
+const getBucketMeta = (row = {}) => {
+  const bucket = row.bucket_key || getBucketFromBodegaName(row.nombre);
+  return {
+    ...row,
+    bucket_key: bucket,
+    nombre_visible: getBucketLabel(bucket),
+  };
+};
 
 /**
  * Crear traslado (atomico) entre 2 bodegas.
@@ -62,6 +96,16 @@ export const crearTraslado = async ({
       throw new Error("Bodega origen o destino no encontrada");
     }
 
+    const moduloOrigen = getBucketFromBodegaName(bOrigen.nombre);
+    const moduloDestino = getBucketFromBodegaName(bDestino.nombre);
+
+    if (!moduloOrigen || !moduloDestino) {
+      throw new Error("Las bodegas de traslado deben ser General o Productos Taller");
+    }
+    if (moduloOrigen === moduloDestino) {
+      throw new Error("El origen y destino deben pertenecer a modulos diferentes");
+    }
+
     // 2) Consolidar items por id_producto (evita duplicados en el mismo traslado)
     const consolidado = new Map();
     for (const raw of items) {
@@ -81,13 +125,15 @@ export const crearTraslado = async ({
 
     // 3) Crear encabezado (totales a 0, se actualizan al final)
     const rHead = await client.query(
-      `INSERT INTO "Traslado"(
+      `INSERT INTO traslado(
           fecha,
           id_bodega_origen,
           id_bodega_destino,
           id_sucursal_origen,
           id_sucursal_destino,
           id_usuario,
+          modulo_origen,
+          modulo_destino,
           estado,
           motivo,
           observaciones,
@@ -98,8 +144,9 @@ export const crearTraslado = async ({
        VALUES (
           COALESCE($1::timestamptz, now()),
           $2, $3, $4, $5, $6,
-          'RECIBIDO',
           $7, $8,
+          'RECIBIDO',
+          $9, $10,
           0, 0, 0
        )
        RETURNING *`,
@@ -110,6 +157,8 @@ export const crearTraslado = async ({
         bOrigen.id_sucursal ?? null,
         bDestino.id_sucursal ?? null,
         id_usuario,
+        moduloOrigen,
+        moduloDestino,
         motivo ? String(motivo).slice(0, 200) : null,
         observaciones ? String(observaciones).slice(0, 500) : null,
       ]
@@ -144,7 +193,7 @@ export const crearTraslado = async ({
 
       // 4.2 Insertar detalle
       await client.query(
-        `INSERT INTO "Traslado_detalle"(
+        `INSERT INTO traslado_detalle(
             id_traslado, id_producto, cantidad, costo_unitario, subtotal
          ) VALUES ($1,$2,$3,$4,$5)`,
         [id_traslado, it.id_producto, it.cantidad, costo, subtotal]
@@ -245,11 +294,21 @@ export const crearTraslado = async ({
           id_traslado,
         ]
       );
+
+      if (nuevaExistenciaOrigen === 0 && moduloOrigen !== moduloDestino) {
+        await client.query(
+          `UPDATE "Producto"
+           SET modulo_origen = $1,
+               updated_at = now()
+           WHERE id_producto = $2`,
+          [moduloDestino, it.id_producto]
+        );
+      }
     }
 
     // 5) Actualizar totales del encabezado
     const rFinal = await client.query(
-      `UPDATE "Traslado"
+      `UPDATE traslado
        SET total_items = $1,
            total_unidades = $2,
            total_valorizado = $3,
@@ -333,7 +392,7 @@ export const listarTraslados = async (filters = {}) => {
   }
   if (id_producto) {
     where.push(`EXISTS (
-      SELECT 1 FROM "Traslado_detalle" td
+      SELECT 1 FROM traslado_detalle td
       WHERE td.id_traslado = t.id_traslado AND td.id_producto = $${i++}
     )`);
     params.push(Number(id_producto));
@@ -343,7 +402,7 @@ export const listarTraslados = async (filters = {}) => {
 
   const rCount = await pool.query(
     `SELECT COUNT(*)::int AS total
-     FROM "Traslado" t
+     FROM traslado t
      ${whereSql}`,
     params
   );
@@ -354,13 +413,21 @@ export const listarTraslados = async (filters = {}) => {
     `SELECT
         t.*,
         ${folioSql} AS folio,
-        bo."Nombre" AS bodega_origen_nombre,
-        bd."Nombre" AS bodega_destino_nombre,
+        COALESCE(t.modulo_origen, '${GENERAL_BUCKET}') AS bucket_origen,
+        COALESCE(t.modulo_destino, '${SERVICIOS_BUCKET}') AS bucket_destino,
+        CASE
+          WHEN COALESCE(t.modulo_origen, '${GENERAL_BUCKET}') = '${SERVICIOS_BUCKET}' THEN 'Productos Taller'
+          ELSE 'General'
+        END AS bodega_origen_nombre,
+        CASE
+          WHEN COALESCE(t.modulo_destino, '${SERVICIOS_BUCKET}') = '${SERVICIOS_BUCKET}' THEN 'Productos Taller'
+          ELSE 'General'
+        END AS bodega_destino_nombre,
         u.username  AS usuario_username,
         u.nombre    AS usuario_nombre,
         ur.username AS usuario_recibe_username,
         ua.username AS anulada_por_username
-     FROM "Traslado" t
+     FROM traslado t
      LEFT JOIN "Bodega"  bo ON bo.id_bodega  = t.id_bodega_origen
      LEFT JOIN "Bodega"  bd ON bd.id_bodega  = t.id_bodega_destino
      LEFT JOIN "Usuario" u  ON u.id_usuario  = t.id_usuario
@@ -393,8 +460,16 @@ export const getTrasladoCompleto = async (id_traslado) => {
     `SELECT
         t.*,
         ${folioSql} AS folio,
-        bo."Nombre" AS bodega_origen_nombre,
-        bd."Nombre" AS bodega_destino_nombre,
+        COALESCE(t.modulo_origen, '${GENERAL_BUCKET}') AS bucket_origen,
+        COALESCE(t.modulo_destino, '${SERVICIOS_BUCKET}') AS bucket_destino,
+        CASE
+          WHEN COALESCE(t.modulo_origen, '${GENERAL_BUCKET}') = '${SERVICIOS_BUCKET}' THEN 'Productos Taller'
+          ELSE 'General'
+        END AS bodega_origen_nombre,
+        CASE
+          WHEN COALESCE(t.modulo_destino, '${SERVICIOS_BUCKET}') = '${SERVICIOS_BUCKET}' THEN 'Productos Taller'
+          ELSE 'General'
+        END AS bodega_destino_nombre,
         so."Nombre"    AS sucursal_origen_nombre,
         so."Direccion" AS sucursal_origen_direccion,
         so."Telefono"  AS sucursal_origen_telefono,
@@ -407,7 +482,7 @@ export const getTrasladoCompleto = async (id_traslado) => {
         ur.nombre    AS usuario_recibe_nombre,
         ua.username  AS anulada_por_username,
         ua.nombre    AS anulada_por_nombre
-     FROM "Traslado" t
+     FROM traslado t
      LEFT JOIN "Bodega"   bo ON bo.id_bodega   = t.id_bodega_origen
      LEFT JOIN "Bodega"   bd ON bd.id_bodega   = t.id_bodega_destino
      LEFT JOIN "Sucursal" so ON so."Id_sucursal" = t.id_sucursal_origen
@@ -427,7 +502,7 @@ export const getTrasladoCompleto = async (id_traslado) => {
         d.*,
         TRIM(p.nombre) AS producto_nombre,
         p.codigo_barras
-     FROM "Traslado_detalle" d
+     FROM traslado_detalle d
      JOIN "Producto" p ON p.id_producto = d.id_producto
      WHERE d.id_traslado = $1
      ORDER BY d.id_traslado_detalle ASC`,
@@ -473,7 +548,7 @@ export const anularTraslado = async ({ id_traslado, motivo, id_usuario }) => {
     await client.query("BEGIN");
 
     const rT = await client.query(
-      `SELECT * FROM "Traslado"
+      `SELECT * FROM traslado
        WHERE id_traslado = $1
        FOR UPDATE`,
       [id_traslado]
@@ -487,7 +562,7 @@ export const anularTraslado = async ({ id_traslado, motivo, id_usuario }) => {
     const rDet = await client.query(
       `SELECT d.id_traslado_detalle, d.id_producto, d.cantidad,
               TRIM(p.nombre) AS producto_nombre
-       FROM "Traslado_detalle" d
+       FROM traslado_detalle d
        JOIN "Producto" p ON p.id_producto = d.id_producto
        WHERE d.id_traslado = $1
        ORDER BY d.id_traslado_detalle ASC`,
@@ -505,6 +580,16 @@ export const anularTraslado = async ({ id_traslado, motivo, id_usuario }) => {
     );
     const bOrigen = rBodegas.rows.find((b) => b.id_bodega === origenId);
     const bDestino = rBodegas.rows.find((b) => b.id_bodega === destinoId);
+    const moduloOrigen = getBucketByNameOrFallback(
+      t.modulo_origen,
+      bOrigen?.nombre,
+      GENERAL_BUCKET
+    );
+    const moduloDestino = getBucketByNameOrFallback(
+      t.modulo_destino,
+      bDestino?.nombre,
+      SERVICIOS_BUCKET
+    );
 
     for (const d of rDet.rows) {
       const cantidad = Number(d.cantidad);
@@ -556,6 +641,16 @@ export const anularTraslado = async ({ id_traslado, motivo, id_usuario }) => {
         ]
       );
 
+      if (nuevoDest === 0 && moduloOrigen !== moduloDestino) {
+        await client.query(
+          `UPDATE "Producto"
+           SET modulo_origen = $1,
+               updated_at = now()
+           WHERE id_producto = $2`,
+          [moduloOrigen, d.id_producto]
+        );
+      }
+
       // Reversa en origen (ENTRADA): devolver las unidades
       const rStockOrig = await client.query(
         `SELECT existencia
@@ -605,7 +700,7 @@ export const anularTraslado = async ({ id_traslado, motivo, id_usuario }) => {
     }
 
     const rUpd = await client.query(
-      `UPDATE "Traslado"
+      `UPDATE traslado
        SET estado = 'ANULADO',
            anulada_en = now(),
            anulada_por = $1,
@@ -634,12 +729,26 @@ export const listarBodegas = async () => {
     `SELECT b.id_bodega,
             b."Nombre" AS nombre,
             b.id_sucursal,
-            s."Nombre" AS sucursal_nombre
+            s."Nombre" AS sucursal_nombre,
+            CASE
+              WHEN UPPER(BTRIM(b."Nombre")) = 'GENERAL' THEN 'GENERAL'
+              WHEN UPPER(BTRIM(b."Nombre")) IN ('PRODUCTOS_TALLER', 'TIENDA', 'SERVICIOS', 'TALLER') THEN 'SERVICIOS'
+              ELSE NULL
+            END AS bucket_key
      FROM "Bodega" b
      LEFT JOIN "Sucursal" s ON s."Id_sucursal" = b.id_sucursal
-     ORDER BY b."Nombre" ASC`
+     WHERE UPPER(BTRIM(b."Nombre")) IN ('GENERAL', 'PRODUCTOS_TALLER', 'TIENDA', 'SERVICIOS', 'TALLER')
+     ORDER BY
+       CASE
+         WHEN UPPER(BTRIM(b."Nombre")) = 'GENERAL' THEN 1
+         WHEN UPPER(BTRIM(b."Nombre")) IN ('PRODUCTOS_TALLER', 'TIENDA', 'SERVICIOS', 'TALLER') THEN 2
+         ELSE 99
+       END,
+       b."Nombre" ASC`
   );
-  return r.rows;
+  return r.rows
+    .map(getBucketMeta)
+    .filter((row) => row.bucket_key === GENERAL_BUCKET || row.bucket_key === SERVICIOS_BUCKET);
 };
 
 /**
@@ -647,6 +756,23 @@ export const listarBodegas = async () => {
  * "transferible" desde GENERAL). Devuelve solo productos activos con existencia>0.
  */
 export const stockBodega = async (id_bodega) => {
+  const rBodega = await pool.query(
+    `SELECT id_bodega, "Nombre" AS nombre
+     FROM "Bodega"
+     WHERE id_bodega = $1`,
+    [Number(id_bodega)]
+  );
+
+  const bodega = rBodega.rows[0];
+  if (!bodega) {
+    throw new Error("Bodega no encontrada");
+  }
+
+  const bucket = getBucketFromBodegaName(bodega.nombre);
+  if (!bucket) {
+    throw new Error("La bodega seleccionada no pertenece a General o Productos Taller");
+  }
+
   const r = await pool.query(
     `SELECT
         p.id_producto,
@@ -654,14 +780,20 @@ export const stockBodega = async (id_bodega) => {
         p.codigo_barras,
         p.precio_compra,
         p.precio_venta,
+        COALESCE(p.modulo_origen, '${GENERAL_BUCKET}') AS modulo_origen,
         COALESCE(sp.existencia, 0) AS existencia
      FROM "Producto" p
      LEFT JOIN "Stock_producto" sp
             ON sp.id_producto = p.id_producto
            AND sp.id_bodega   = $1
      WHERE p.activo = true
+       AND COALESCE(p.modulo_origen, '${GENERAL_BUCKET}') = $2
      ORDER BY TRIM(p.nombre) ASC`,
-    [Number(id_bodega)]
+    [Number(id_bodega), bucket]
   );
-  return r.rows;
+  return r.rows.map((row) => ({
+    ...row,
+    bucket_key: bucket,
+    nombre_origen_visible: getBucketLabel(bucket),
+  }));
 };
