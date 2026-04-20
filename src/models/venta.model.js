@@ -885,6 +885,36 @@ export const getVentaCompleta = async (id_venta) => {
 
   const anulaciones = rAnulaciones.rows;
 
+  // 2b) Credito a empleado asociado (si la venta es "CREDITO_EMPLEADO")
+  let credito_empleado = null;
+  if (venta.id_empleado_credito) {
+    const rCredito = await pool.query(
+      `SELECT
+          ce.id_credito_empleado,
+          ce.id_venta,
+          ce.id_empleado,
+          ce.monto,
+          ce.saldo_pendiente,
+          (ce.fecha_credito AT TIME ZONE 'America/Guatemala') AS fecha_credito,
+          ce.fecha_cobro_estimada,
+          ce.estado,
+          ce.observacion,
+          ce.motivo_condonacion,
+          (ce.cobrado_en AT TIME ZONE 'America/Guatemala') AS cobrado_en,
+          e.nombre    AS empleado_nombre,
+          e.cargo     AS empleado_cargo,
+          e.tipo_pago AS empleado_tipo_pago,
+          e.dia_pago  AS empleado_dia_pago,
+          e.sueldo    AS empleado_sueldo
+        FROM "Credito_empleado" ce
+        JOIN "Empleado" e ON e.id_empleado = ce.id_empleado
+       WHERE ce.id_venta = $1
+       LIMIT 1`,
+      [id_venta]
+    );
+    credito_empleado = rCredito.rows[0] || null;
+  }
+
   // 3) Resumen calculado (para no depender de venta.total)
   const resumen = detalles.reduce(
     (acc, d) => {
@@ -931,6 +961,7 @@ export const getVentaCompleta = async (id_venta) => {
     detalles,
     anulaciones,
     resumen,
+    credito_empleado,
   };
 };
 
