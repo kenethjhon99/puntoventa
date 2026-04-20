@@ -1749,7 +1749,7 @@ export const getReciboReparacion = async (idReparacionOrden) => {
         u.username   AS usuario_username,
         u.nombre     AS usuario_nombre,
         et.nombre    AS tecnico_nombre,
-        s.nombre     AS sucursal_nombre
+        s."Nombre"   AS sucursal_nombre
       FROM "Reparacion_orden" ro
       INNER JOIN "Servicio_tipo_vehiculo" stv
         ON stv.id_tipo_vehiculo = ro.id_tipo_vehiculo

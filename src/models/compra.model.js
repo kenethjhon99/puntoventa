@@ -317,14 +317,14 @@ export const getCompraCompleta = async (id_compra) => {
         p.direccion AS proveedor_direccion,
         u.username AS usuario_username,
         u.nombre AS usuario_nombre,
-        s.nombre AS sucursal_nombre,
-        s.direccion AS sucursal_direccion,
-        s.telefono AS sucursal_telefono,
-        s.correo AS sucursal_correo
+        s."Nombre" AS sucursal_nombre,
+        s."Direccion" AS sucursal_direccion,
+        s."Telefono" AS sucursal_telefono,
+        NULL::text AS sucursal_correo
      FROM "Compra" c
      JOIN "Proveedor" p ON p.id_proveedor = c.id_proveedor
      JOIN "Usuario" u ON u.id_usuario = c.id_usuario
-     LEFT JOIN "Sucursal" s ON s.id_sucursal = c.id_sucursal
+     LEFT JOIN "Sucursal" s ON s."Id_sucursal" = c.id_sucursal
      WHERE c.id_compra = $1`,
     [id_compra]
   );

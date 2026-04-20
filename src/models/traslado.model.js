@@ -395,12 +395,12 @@ export const getTrasladoCompleto = async (id_traslado) => {
         ${folioSql} AS folio,
         bo."Nombre" AS bodega_origen_nombre,
         bd."Nombre" AS bodega_destino_nombre,
-        so.nombre    AS sucursal_origen_nombre,
-        so.direccion AS sucursal_origen_direccion,
-        so.telefono  AS sucursal_origen_telefono,
-        sd.nombre    AS sucursal_destino_nombre,
-        sd.direccion AS sucursal_destino_direccion,
-        sd.telefono  AS sucursal_destino_telefono,
+        so."Nombre"    AS sucursal_origen_nombre,
+        so."Direccion" AS sucursal_origen_direccion,
+        so."Telefono"  AS sucursal_origen_telefono,
+        sd."Nombre"    AS sucursal_destino_nombre,
+        sd."Direccion" AS sucursal_destino_direccion,
+        sd."Telefono"  AS sucursal_destino_telefono,
         u.username   AS usuario_username,
         u.nombre     AS usuario_nombre,
         ur.username  AS usuario_recibe_username,
@@ -634,7 +634,7 @@ export const listarBodegas = async () => {
     `SELECT b.id_bodega,
             b."Nombre" AS nombre,
             b.id_sucursal,
-            s.nombre AS sucursal_nombre
+            s."Nombre" AS sucursal_nombre
      FROM "Bodega" b
      LEFT JOIN "Sucursal" s ON s."Id_sucursal" = b.id_sucursal
      ORDER BY b."Nombre" ASC`
