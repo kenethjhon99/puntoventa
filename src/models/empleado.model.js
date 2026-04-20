@@ -5,21 +5,26 @@ const normalizeActorId = (actorId) => {
   return Number.isInteger(parsed) && parsed > 0 ? parsed : null;
 };
 
+const EMPLEADO_COLUMNS = `
+  id_empleado,
+  nombre,
+  cargo,
+  tipo_pago,
+  sueldo,
+  dia_pago,
+  activo,
+  created_at,
+  updated_at,
+  created_by,
+  updated_by,
+  inactivado_en,
+  inactivado_por
+`;
+
 export const getEmpleados = async ({ incluirInactivos = false } = {}) => {
   const result = await pool.query(
     `
-      SELECT
-        id_empleado,
-        nombre,
-        cargo,
-        tipo_pago,
-        activo,
-        created_at,
-        updated_at,
-        created_by,
-        updated_by,
-        inactivado_en,
-        inactivado_por
+      SELECT ${EMPLEADO_COLUMNS}
       FROM "Empleado"
       WHERE $1::boolean = true OR activo = true
       ORDER BY activo DESC, nombre ASC, id_empleado ASC
@@ -34,6 +39,8 @@ export const createEmpleado = async ({
   nombre,
   cargo,
   tipo_pago,
+  sueldo,
+  dia_pago,
   actorId = null,
 }) => {
   const actor = normalizeActorId(actorId);
@@ -44,25 +51,16 @@ export const createEmpleado = async ({
         nombre,
         cargo,
         tipo_pago,
+        sueldo,
+        dia_pago,
         activo,
         created_by,
         updated_by
       )
-      VALUES ($1, $2, $3, true, $4, $4)
-      RETURNING
-        id_empleado,
-        nombre,
-        cargo,
-        tipo_pago,
-        activo,
-        created_at,
-        updated_at,
-        created_by,
-        updated_by,
-        inactivado_en,
-        inactivado_por
+      VALUES ($1, $2, $3, $4, $5, true, $6, $6)
+      RETURNING ${EMPLEADO_COLUMNS}
     `,
-    [nombre, cargo, tipo_pago, actor]
+    [nombre, cargo, tipo_pago, sueldo, dia_pago, actor]
   );
 
   return result.rows[0];
@@ -70,7 +68,7 @@ export const createEmpleado = async ({
 
 export const updateEmpleado = async (
   id_empleado,
-  { nombre, cargo, tipo_pago },
+  { nombre, cargo, tipo_pago, sueldo, dia_pago },
   actorId = null
 ) => {
   const actor = normalizeActorId(actorId);
@@ -81,22 +79,14 @@ export const updateEmpleado = async (
       SET nombre = $1,
           cargo = $2,
           tipo_pago = $3,
-          updated_by = $4
-      WHERE id_empleado = $5
-      RETURNING
-        id_empleado,
-        nombre,
-        cargo,
-        tipo_pago,
-        activo,
-        created_at,
-        updated_at,
-        created_by,
-        updated_by,
-        inactivado_en,
-        inactivado_por
+          sueldo = $4,
+          dia_pago = $5,
+          updated_by = $6,
+          updated_at = now()
+      WHERE id_empleado = $7
+      RETURNING ${EMPLEADO_COLUMNS}
     `,
-    [nombre, cargo, tipo_pago, actor, id_empleado]
+    [nombre, cargo, tipo_pago, sueldo, dia_pago, actor, id_empleado]
   );
 
   return result.rows[0];
@@ -114,18 +104,7 @@ export const desactivarEmpleado = async (id_empleado, actorId = null) => {
           updated_by = $2::int
       WHERE id_empleado = $1
         AND activo = true
-      RETURNING
-        id_empleado,
-        nombre,
-        cargo,
-        tipo_pago,
-        activo,
-        created_at,
-        updated_at,
-        created_by,
-        updated_by,
-        inactivado_en,
-        inactivado_por
+      RETURNING ${EMPLEADO_COLUMNS}
     `,
     [id_empleado, actor]
   );
@@ -145,18 +124,7 @@ export const activarEmpleado = async (id_empleado, actorId = null) => {
           updated_by = $2::int
       WHERE id_empleado = $1
         AND activo = false
-      RETURNING
-        id_empleado,
-        nombre,
-        cargo,
-        tipo_pago,
-        activo,
-        created_at,
-        updated_at,
-        created_by,
-        updated_by,
-        inactivado_en,
-        inactivado_por
+      RETURNING ${EMPLEADO_COLUMNS}
     `,
     [id_empleado, actor]
   );

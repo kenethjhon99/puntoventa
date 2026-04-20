@@ -29,6 +29,9 @@ export const normalizeVentaPayload = (body = {}) => ({
     body.descuento_porcentaje == null || body.descuento_porcentaje === ""
       ? 0
       : Number(body.descuento_porcentaje),
+  id_empleado_credito: normalizeOptionalInteger(body.id_empleado_credito),
+  observacion_credito:
+    String(body.observacion_credito || "").trim().slice(0, 250) || null,
 });
 
 export const validateVentaPayload = (payload) => {
@@ -42,6 +45,25 @@ export const validateVentaPayload = (payload) => {
 
   if (payload.id_cliente !== null && (!Number.isInteger(payload.id_cliente) || payload.id_cliente <= 0)) {
     return "id_cliente invalido";
+  }
+
+  if (
+    payload.id_empleado_credito !== null &&
+    (!Number.isInteger(payload.id_empleado_credito) || payload.id_empleado_credito <= 0)
+  ) {
+    return "id_empleado_credito invalido";
+  }
+
+  if (payload.id_empleado_credito && payload.id_cliente) {
+    return "No se puede registrar venta a credito a empleado con cliente asignado";
+  }
+
+  if (payload.id_empleado_credito && payload.no_cobrar) {
+    return "Credito a empleado no es compatible con venta no cobrada";
+  }
+
+  if (payload.id_empleado_credito && payload.descuento_porcentaje > 0) {
+    return "No se aplica descuento en venta a credito a empleado";
   }
 
   if (payload.monto_recibido !== null && (!Number.isFinite(payload.monto_recibido) || payload.monto_recibido < 0)) {

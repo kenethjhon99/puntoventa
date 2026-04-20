@@ -86,6 +86,8 @@ export const crearVenta = async (req, res) => {
       no_cobrar: payload.no_cobrar,
       no_cobrado_motivo: payload.no_cobrado_motivo,
       no_cobrado_autorizado_por: null,
+      id_empleado_credito: payload.id_empleado_credito,
+      observacion_credito: payload.observacion_credito,
       items: payload.items,
       id_bodega: 1
     });

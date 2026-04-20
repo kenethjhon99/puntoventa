@@ -1,5 +1,9 @@
 import { pool } from "../config/db.js";
 import { calculateDiscountedSaleLine, normalizeDiscountPercentage } from "../utils/ventaDiscount.js";
+import {
+  insertCreditoEnTx,
+  marcarCreditoAnuladoEnTx,
+} from "./creditoEmpleado.model.js";
 
 const TIPO_COMPROBANTE_DEFAULT = "TICKET";
 
@@ -316,6 +320,9 @@ export const anularVentaCompleta = async ({
       [id_usuario, motivo ?? null, id_venta]
     );
 
+    // Si la venta tenia credito a empleado, marcarlo como ANULADO
+    await marcarCreditoAnuladoEnTx(client, id_venta);
+
     await client.query("COMMIT");
 
     return rVentaActualizada.rows[0];
@@ -340,6 +347,8 @@ export const crearVenta = async ({
   no_cobrar = false,
   no_cobrado_motivo = null,
   no_cobrado_autorizado_por = null,
+  id_empleado_credito = null,
+  observacion_credito = null,
   items,
   id_bodega = 1,
 }) => {
@@ -350,13 +359,22 @@ export const crearVenta = async ({
 
     const comprobante = await emitirComprobanteVenta(client, tipo_comprobante);
     const ventaSinCobro = Boolean(no_cobrar);
-    const descuentoPorcentajeNormalizado = normalizeDiscountPercentage(descuento_porcentaje);
+    const esCreditoEmpleado =
+      id_empleado_credito != null && Number.isInteger(Number(id_empleado_credito));
+    const descuentoPorcentajeNormalizado = esCreditoEmpleado
+      ? 0
+      : normalizeDiscountPercentage(descuento_porcentaje);
     const metodoPagoNormalizado = String(metodo_pago ?? "EFECTIVO")
       .trim()
       .toUpperCase();
-    const metodoPagoPersistido = ventaSinCobro
-      ? "NO_COBRADO"
-      : metodoPagoNormalizado;
+    const metodoPagoPersistido = esCreditoEmpleado
+      ? "CREDITO_EMPLEADO"
+      : ventaSinCobro
+        ? "NO_COBRADO"
+        : metodoPagoNormalizado;
+    const tipoVentaPersistido = esCreditoEmpleado
+      ? "CREDITO"
+      : (tipo_venta ?? "CONTADO");
     const montoRecibidoNormalizado =
       monto_recibido == null || monto_recibido === ""
         ? null
@@ -431,12 +449,14 @@ export const crearVenta = async ({
       no_cobrado_autorizado_en,
       no_cobrado_validado_por,
       no_cobrado_validado_en,
-      no_cobrado_validacion_nota
+      no_cobrado_validacion_nota,
+      id_empleado_credito
     )
    VALUES (
       now(), 0, $1, $2, $3, $4, $5, $6, $7,
       $8, $9, $10, $11, $12, NULL, 0, $13, 0,
-      $14, $15, CASE WHEN $16 THEN now() ELSE NULL END, NULL, NULL, NULL
+      $14, $15, CASE WHEN $16 THEN now() ELSE NULL END, NULL, NULL, NULL,
+      $17
    )
    RETURNING id_venta,
             (fecha AT TIME ZONE 'America/Guatemala') AS fecha,
@@ -452,12 +472,12 @@ export const crearVenta = async ({
             (no_cobrado_validado_en AT TIME ZONE 'America/Guatemala') AS no_cobrado_validado_en,
             no_cobrado_validacion_nota`,
   [
-    tipo_venta ?? "CONTADO",
+    tipoVentaPersistido,
     metodoPagoPersistido,
     id_sucursal,
     id_usuario,
     id_caja_sesion,
-    id_cliente,
+    esCreditoEmpleado ? null : id_cliente,
     ventaSinCobro ? "NO_COBRADO" : "COMPLETADA",
     comprobante.id_comprobante_serie,
     comprobante.tipo_comprobante,
@@ -468,6 +488,7 @@ export const crearVenta = async ({
     ventaSinCobro ? no_cobrado_motivo : null,
     ventaSinCobro ? no_cobrado_autorizado_por : null,
     ventaSinCobro,
+    esCreditoEmpleado ? Number(id_empleado_credito) : null,
   ]
 );
 
@@ -587,10 +608,11 @@ export const crearVenta = async ({
       [
         Number(total.toFixed(2)),
         Number(utilidad_total.toFixed(2)),
-        !ventaSinCobro && montoRecibidoNormalizado != null
+        !ventaSinCobro && !esCreditoEmpleado && montoRecibidoNormalizado != null
           ? Number(montoRecibidoNormalizado.toFixed(2))
           : null,
         !ventaSinCobro &&
+        !esCreditoEmpleado &&
         metodoPagoNormalizado === "EFECTIVO" &&
         montoRecibidoNormalizado != null
           ? Number(Math.max(0, montoRecibidoNormalizado - total).toFixed(2))
@@ -600,9 +622,22 @@ export const crearVenta = async ({
       ]
     );
 
+    let creditoEmpleado = null;
+
+    if (esCreditoEmpleado) {
+      const result = await insertCreditoEnTx(client, {
+        id_venta: venta.id_venta,
+        id_empleado: Number(id_empleado_credito),
+        monto: Number(total.toFixed(2)),
+        observacion: observacion_credito,
+        id_usuario,
+      });
+      creditoEmpleado = result.credito;
+    }
+
     await client.query("COMMIT");
 
-    return rFinal.rows[0];
+    return { ...rFinal.rows[0], credito_empleado: creditoEmpleado };
   } catch (e) {
     await client.query("ROLLBACK");
     throw e;
