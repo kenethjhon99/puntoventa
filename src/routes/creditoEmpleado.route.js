@@ -15,7 +15,7 @@ const router = Router();
 // Alertas para dashboard/sidebar
 router.get("/alertas", auth, requireRole("SUPER_ADMIN", "ADMIN", "LECTURA"), getAlertas);
 
-// Nomina proxima (sueldo - creditos pendientes por empleado)
+// Proximo corte estimado de creditos por empleado
 router.get("/nomina-proxima", auth, requireRole("SUPER_ADMIN", "ADMIN", "LECTURA"), getNominaProxima);
 
 // Listar creditos con filtros (estado, id_empleado, desde, hasta, criticidad)

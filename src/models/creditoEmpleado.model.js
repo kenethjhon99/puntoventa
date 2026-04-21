@@ -22,8 +22,6 @@ const SELECT_CREDITO = `
     e.nombre     AS empleado_nombre,
     e.cargo      AS empleado_cargo,
     e.tipo_pago  AS empleado_tipo_pago,
-    e.dia_pago   AS empleado_dia_pago,
-    e.sueldo     AS empleado_sueldo,
     e.activo     AS empleado_activo,
     v.fecha      AS venta_fecha,
     v.total      AS venta_total,
@@ -61,7 +59,7 @@ export const insertCreditoEnTx = async (client, data) => {
   } = data;
 
   const rEmp = await client.query(
-    `SELECT id_empleado, nombre, cargo, tipo_pago, dia_pago, sueldo, activo
+    `SELECT id_empleado, nombre, cargo, tipo_pago, activo
        FROM "Empleado"
       WHERE id_empleado = $1
       FOR UPDATE`,
@@ -233,18 +231,13 @@ export const getNominaProxima = async () => {
       e.nombre,
       e.cargo,
       e.tipo_pago,
-      e.dia_pago,
-      e.sueldo,
       e.activo,
       COALESCE(SUM(ce.saldo_pendiente) FILTER (
         WHERE ce.estado = 'PENDIENTE'
       ), 0)::numeric(18,2) AS total_creditos_pendientes,
       COUNT(ce.id_credito_empleado) FILTER (
         WHERE ce.estado = 'PENDIENTE'
-      )::int AS num_creditos_pendientes,
-      (e.sueldo - COALESCE(SUM(ce.saldo_pendiente) FILTER (
-        WHERE ce.estado = 'PENDIENTE'
-      ), 0))::numeric(18,2) AS sueldo_neto_estimado
+      )::int AS num_creditos_pendientes
     FROM "Empleado" e
     LEFT JOIN "Credito_empleado" ce ON ce.id_empleado = e.id_empleado
     WHERE e.activo = true
@@ -263,7 +256,6 @@ export const getNominaProxima = async () => {
     return {
       ...row,
       fecha_pago_estimada,
-      saldo_rojo: Number(row.sueldo_neto_estimado) < 0,
     };
   });
 };

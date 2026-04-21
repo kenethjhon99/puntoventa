@@ -10,8 +10,6 @@ const EMPLEADO_COLUMNS = `
   nombre,
   cargo,
   tipo_pago,
-  sueldo,
-  dia_pago,
   activo,
   created_at,
   updated_at,
@@ -39,8 +37,6 @@ export const createEmpleado = async ({
   nombre,
   cargo,
   tipo_pago,
-  sueldo,
-  dia_pago,
   actorId = null,
 }) => {
   const actor = normalizeActorId(actorId);
@@ -51,16 +47,14 @@ export const createEmpleado = async ({
         nombre,
         cargo,
         tipo_pago,
-        sueldo,
-        dia_pago,
         activo,
         created_by,
         updated_by
       )
-      VALUES ($1, $2, $3, $4, $5, true, $6, $6)
+      VALUES ($1, $2, $3, true, $4, $4)
       RETURNING ${EMPLEADO_COLUMNS}
     `,
-    [nombre, cargo, tipo_pago, sueldo, dia_pago, actor]
+    [nombre, cargo, tipo_pago, actor]
   );
 
   return result.rows[0];
@@ -68,7 +62,7 @@ export const createEmpleado = async ({
 
 export const updateEmpleado = async (
   id_empleado,
-  { nombre, cargo, tipo_pago, sueldo, dia_pago },
+  { nombre, cargo, tipo_pago },
   actorId = null
 ) => {
   const actor = normalizeActorId(actorId);
@@ -79,14 +73,12 @@ export const updateEmpleado = async (
       SET nombre = $1,
           cargo = $2,
           tipo_pago = $3,
-          sueldo = $4,
-          dia_pago = $5,
-          updated_by = $6,
+          updated_by = $4,
           updated_at = now()
-      WHERE id_empleado = $7
+      WHERE id_empleado = $5
       RETURNING ${EMPLEADO_COLUMNS}
     `,
-    [nombre, cargo, tipo_pago, sueldo, dia_pago, actor, id_empleado]
+    [nombre, cargo, tipo_pago, actor, id_empleado]
   );
 
   return result.rows[0];

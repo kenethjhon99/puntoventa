@@ -903,9 +903,7 @@ export const getVentaCompleta = async (id_venta) => {
           (ce.cobrado_en AT TIME ZONE 'America/Guatemala') AS cobrado_en,
           e.nombre    AS empleado_nombre,
           e.cargo     AS empleado_cargo,
-          e.tipo_pago AS empleado_tipo_pago,
-          e.dia_pago  AS empleado_dia_pago,
-          e.sueldo    AS empleado_sueldo
+          e.tipo_pago AS empleado_tipo_pago
         FROM "Credito_empleado" ce
         JOIN "Empleado" e ON e.id_empleado = ce.id_empleado
        WHERE ce.id_venta = $1
@@ -964,4 +962,3 @@ export const getVentaCompleta = async (id_venta) => {
     credito_empleado,
   };
 };
-
