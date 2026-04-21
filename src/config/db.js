@@ -447,96 +447,113 @@ export async function ensureSchema() {
     DROP COLUMN IF EXISTS modulo_origen
   `);
 
+  // --------------------------------------------------------------------
+  // Bodega unica PRINCIPAL.
+  // Fase 4b.1 consolido las dos bodegas historicas (GENERAL y
+  // PRODUCTOS_TALLER) en una sola "PRINCIPAL". Este bloque:
+  //   1. Garantiza que exista una bodega PRINCIPAL, renombrando
+  //      GENERAL -> PRINCIPAL si hace falta. Si no hay bodegas, crea
+  //      una nueva PRINCIPAL.
+  //   2. Si todavia existe una bodega "PRODUCTOS_TALLER" (instalaciones
+  //      viejas), consolida su stock en PRINCIPAL y reapunta el kardex
+  //      historico. No borra la fila de Bodega: queda como "ghost" para
+  //      mantener FK integrity de la tabla "traslado" historica.
+  // Espejo de bd/migrations/2026-04-20c_consolidar_stock_principal.sql.
+  // Idempotente.
+  // --------------------------------------------------------------------
   await pool.query(`
     DO $$
     DECLARE
       v_sucursal integer;
-      v_general integer;
+      v_principal integer;
       v_taller integer;
     BEGIN
       SELECT COALESCE(MIN("Id_sucursal"), 1)
       INTO v_sucursal
       FROM "Sucursal";
 
-      IF NOT EXISTS (
-        SELECT 1
-        FROM "Bodega"
+      -- Renombrar GENERAL -> PRINCIPAL si es necesario.
+      IF EXISTS (
+        SELECT 1 FROM "Bodega"
         WHERE UPPER(BTRIM("Nombre")) = 'GENERAL'
-      ) AND (
-        SELECT COUNT(*)
-        FROM "Bodega"
-      ) = 1 THEN
+      ) AND NOT EXISTS (
+        SELECT 1 FROM "Bodega"
+        WHERE UPPER(BTRIM("Nombre")) = 'PRINCIPAL'
+      ) THEN
         UPDATE "Bodega"
-        SET "Nombre" = 'GENERAL'
+           SET "Nombre" = 'PRINCIPAL'
+         WHERE UPPER(BTRIM("Nombre")) = 'GENERAL';
+      END IF;
+
+      -- Si no existe ninguna bodega, crear PRINCIPAL.
+      IF NOT EXISTS (
+        SELECT 1 FROM "Bodega"
+        WHERE UPPER(BTRIM("Nombre")) = 'PRINCIPAL'
+      ) AND (SELECT COUNT(*) FROM "Bodega") = 0 THEN
+        INSERT INTO "Bodega"("Nombre", id_sucursal)
+        VALUES ('PRINCIPAL', v_sucursal);
+      END IF;
+
+      -- Si hay al menos una bodega pero ninguna se llama PRINCIPAL,
+      -- rebautizar la de id mas bajo.
+      IF NOT EXISTS (
+        SELECT 1 FROM "Bodega"
+        WHERE UPPER(BTRIM("Nombre")) = 'PRINCIPAL'
+      ) THEN
+        UPDATE "Bodega"
+        SET "Nombre" = 'PRINCIPAL'
         WHERE id_bodega = (
-          SELECT id_bodega
-          FROM "Bodega"
-          ORDER BY id_bodega
-          LIMIT 1
+          SELECT id_bodega FROM "Bodega" ORDER BY id_bodega LIMIT 1
         );
       END IF;
 
-      IF EXISTS (
-        SELECT 1
+      SELECT id_bodega
+        INTO v_principal
         FROM "Bodega"
-        WHERE UPPER(BTRIM("Nombre")) = 'TIENDA'
-      ) AND NOT EXISTS (
-        SELECT 1
-        FROM "Bodega"
-        WHERE UPPER(BTRIM("Nombre")) = 'PRODUCTOS_TALLER'
-      ) THEN
-        UPDATE "Bodega"
-        SET "Nombre" = 'PRODUCTOS_TALLER'
-        WHERE UPPER(BTRIM("Nombre")) = 'TIENDA';
-      END IF;
-
-      IF NOT EXISTS (
-        SELECT 1
-        FROM "Bodega"
-        WHERE UPPER(BTRIM("Nombre")) = 'GENERAL'
-      ) THEN
-        INSERT INTO "Bodega"("Nombre", id_sucursal)
-        VALUES ('GENERAL', v_sucursal);
-      END IF;
-
-      IF NOT EXISTS (
-        SELECT 1
-        FROM "Bodega"
-        WHERE UPPER(BTRIM("Nombre")) = 'PRODUCTOS_TALLER'
-      ) THEN
-        INSERT INTO "Bodega"("Nombre", id_sucursal)
-        VALUES ('PRODUCTOS_TALLER', v_sucursal);
-      END IF;
+       WHERE UPPER(BTRIM("Nombre")) = 'PRINCIPAL'
+       ORDER BY id_bodega
+       LIMIT 1;
 
       SELECT id_bodega
-      INTO v_general
-      FROM "Bodega"
-      WHERE UPPER(BTRIM("Nombre")) = 'GENERAL'
-      ORDER BY id_bodega
-      LIMIT 1;
+        INTO v_taller
+        FROM "Bodega"
+       WHERE UPPER(BTRIM("Nombre")) = 'PRODUCTOS_TALLER'
+       ORDER BY id_bodega
+       LIMIT 1;
 
-      SELECT id_bodega
-      INTO v_taller
-      FROM "Bodega"
-      WHERE UPPER(BTRIM("Nombre")) = 'PRODUCTOS_TALLER'
-      ORDER BY id_bodega
-      LIMIT 1;
+      -- Consolidacion de stock TALLER -> PRINCIPAL (solo si existe
+      -- todavia la bodega TALLER y es distinta a PRINCIPAL).
+      IF v_principal IS NOT NULL
+         AND v_taller IS NOT NULL
+         AND v_taller <> v_principal THEN
 
-      IF v_general IS NOT NULL AND v_taller IS NOT NULL THEN
-        UPDATE "Stock_producto" sp
-        SET id_bodega = v_taller,
-            updated_at = now()
-        FROM "Producto" p
-        WHERE sp.id_producto = p.id_producto
-          AND COALESCE(p.catalogo, 'GENERAL') = 'PRODUCTOS_TALLER'
-          AND sp.id_bodega = v_general
-          AND NOT EXISTS (
-            SELECT 1
-            FROM "Stock_producto" existing
-            WHERE existing.id_producto = sp.id_producto
-              AND existing.id_bodega = v_taller
-              AND existing.id_stock <> sp.id_stock
-          );
+        -- Sumar existencias de productos presentes en ambas bodegas.
+        UPDATE "Stock_producto" sp_dest
+           SET existencia = COALESCE(sp_dest.existencia, 0)
+                          + COALESCE(sp_src.existencia, 0),
+               updated_at = now()
+          FROM "Stock_producto" sp_src
+         WHERE sp_dest.id_bodega = v_principal
+           AND sp_src.id_bodega  = v_taller
+           AND sp_dest.id_producto = sp_src.id_producto;
+
+        -- Borrar filas de TALLER ya consolidadas.
+        DELETE FROM "Stock_producto" sp
+         USING "Stock_producto" sp2
+         WHERE sp.id_bodega  = v_taller
+           AND sp2.id_bodega = v_principal
+           AND sp.id_producto = sp2.id_producto;
+
+        -- Mover filas de TALLER que no tenian contraparte.
+        UPDATE "Stock_producto"
+           SET id_bodega  = v_principal,
+               updated_at = now()
+         WHERE id_bodega = v_taller;
+
+        -- Reapuntar kardex historico.
+        UPDATE "Movimiento_stock"
+           SET id_bodega = v_principal
+         WHERE id_bodega = v_taller;
       END IF;
     END $$;
   `);
