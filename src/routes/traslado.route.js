@@ -2,32 +2,38 @@ import { Router } from "express";
 import { auth } from "../middlewares/auth.js";
 import { requireRole } from "../middlewares/requireRole.js";
 import {
-  crearTraslado,
   listarTraslados,
   getTraslado,
-  anularTraslado,
-  listarBodegas,
-  stockBodega,
 } from "../controllers/traslado.controller.js";
 
 const router = Router();
 
-// Bodegas disponibles (para el selector de origen/destino)
-router.get("/bodegas", auth, requireRole("ADMIN", "LECTURA"), listarBodegas);
+// --------------------------------------------------------------------
+// Traslados: solo lectura desde Fase 4b.2 (Ruta A).
+//
+// A partir de la consolidacion de stock a una sola bodega PRINCIPAL,
+// los traslados entre bodegas perdieron sentido funcional. Los
+// endpoints de creacion, anulacion y exploracion de stock por bodega
+// fueron retirados. Los listados y detalle siguen disponibles para
+// consulta historica.
+// --------------------------------------------------------------------
 
-// Stock disponible en una bodega (para armar el traslado desde origen)
-router.get("/bodegas/:id/stock", auth, requireRole("ADMIN", "LECTURA"), stockBodega);
+const trasladoDeprecated = (_req, res) =>
+  res.status(410).json({
+    error:
+      "Los traslados entre bodegas fueron retirados tras la consolidacion de stock a una bodega unica (PRINCIPAL).",
+  });
 
-// Crear traslado
-router.post("/", auth, requireRole("ADMIN"), crearTraslado);
-
-// Listar traslados (paginado + filtros)
+// Listar traslados (paginado + filtros) - historico
 router.get("/", auth, requireRole("ADMIN", "LECTURA"), listarTraslados);
 
-// Detalle traslado
+// Detalle traslado - historico
 router.get("/:id", auth, requireRole("ADMIN", "LECTURA"), getTraslado);
 
-// Anular traslado (reversa stock)
-router.patch("/:id/anular", auth, requireRole("ADMIN"), anularTraslado);
+// Endpoints deprecados (410 Gone).
+router.post("/", auth, trasladoDeprecated);
+router.patch("/:id/anular", auth, trasladoDeprecated);
+router.get("/bodegas", auth, trasladoDeprecated);
+router.get("/bodegas/:id/stock", auth, trasladoDeprecated);
 
 export default router;
