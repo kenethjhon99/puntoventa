@@ -398,6 +398,45 @@ export async function ensureSchema() {
        OR BTRIM(modulo_origen) = ''
   `);
 
+  // --------------------------------------------------------------------
+  // catalogo de producto (GENERAL / TIENDA / PRODUCTOS_TALLER)
+  // Reemplaza progresivamente a modulo_origen. Espejo de la migracion
+  // bd/migrations/2026-04-20_catalogo_producto.sql. Idempotente.
+  // --------------------------------------------------------------------
+  await pool.query(`
+    ALTER TABLE "Producto"
+    ADD COLUMN IF NOT EXISTS catalogo character varying(20) NOT NULL DEFAULT 'GENERAL'
+  `);
+
+  await pool.query(`
+    DO $$
+    BEGIN
+      IF NOT EXISTS (
+        SELECT 1
+        FROM information_schema.table_constraints
+        WHERE table_schema = 'public'
+          AND table_name = 'Producto'
+          AND constraint_name = 'chk_producto_catalogo'
+      ) THEN
+        ALTER TABLE "Producto"
+        ADD CONSTRAINT chk_producto_catalogo
+        CHECK (catalogo IN ('GENERAL', 'TIENDA', 'PRODUCTOS_TALLER'));
+      END IF;
+    END $$;
+  `);
+
+  await pool.query(`
+    UPDATE "Producto"
+       SET catalogo = 'PRODUCTOS_TALLER'
+     WHERE UPPER(BTRIM(COALESCE(modulo_origen, ''))) = 'SERVICIOS'
+       AND catalogo = 'GENERAL'
+  `);
+
+  await pool.query(`
+    CREATE INDEX IF NOT EXISTS ix_producto_catalogo
+    ON "Producto" (catalogo)
+  `);
+
   await pool.query(`
     DO $$
     DECLARE

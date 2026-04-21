@@ -34,6 +34,7 @@ export const getStock = async ({
       p.nombre,
       p.descripcion,
       COALESCE(p.modulo_origen, 'GENERAL') AS modulo_origen,
+      COALESCE(p.catalogo, 'GENERAL') AS catalogo,
       p.precio_compra,
       p.precio_venta,
       s.id_stock,
@@ -222,6 +223,7 @@ export const getMovimientosStock = async ({
       p.nombre AS producto_nombre,
       p.codigo_barras AS producto_codigo_barras,
       COALESCE(p.modulo_origen, 'GENERAL') AS producto_modulo_origen,
+      COALESCE(p.catalogo, 'GENERAL') AS producto_catalogo,
       p.descripcion AS producto_descripcion,
       COALESCE(u.nombre, u.username, 'Sistema') AS usuario_nombre,
       u.username AS usuario_username

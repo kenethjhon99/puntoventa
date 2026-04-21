@@ -13,31 +13,79 @@ const isAdminProductManager = (req) =>
 const isServiciosProductManager = (req) =>
   getNormalizedRoles(req).includes("ENCARGADO_SERVICIOS");
 
+/**
+ * Permiso de lectura por scope.
+ *   scope = TIENDA | PRODUCTOS_TALLER | ALL
+ *   - TIENDA            -> cualquier rol con acceso a ventas/caja/lectura.
+ *   - PRODUCTOS_TALLER  -> admin, cajero, mecanico, encargado_servicios.
+ *   - ALL               -> solo admin.
+ *
+ * Se mantienen los alias GENERAL/SERVICIOS para compatibilidad transitoria:
+ *   GENERAL -> TIENDA, SERVICIOS -> PRODUCTOS_TALLER.
+ */
+const normalizeScopeAlias = (scope) => {
+  const s = String(scope || "").trim().toUpperCase();
+  if (s === "SERVICIOS") return "PRODUCTOS_TALLER";
+  if (!s || s === "GENERAL") return "TIENDA";
+  return s;
+};
+
 const canAccessScope = (req, scope) => {
   const roles = getNormalizedRoles(req);
-  const normalizedScope = String(scope || "GENERAL").trim().toUpperCase();
+  const normalized = normalizeScopeAlias(scope);
 
-  if (normalizedScope === "SERVICIOS") {
+  if (normalized === "PRODUCTOS_TALLER") {
     return roles.some((role) =>
-      ["SUPER_ADMIN", "ADMIN", "CAJERO", "MECANICO", "ENCARGADO_SERVICIOS"].includes(role)
+      ["SUPER_ADMIN", "ADMIN", "CAJERO", "MECANICO", "ENCARGADO_SERVICIOS", "LECTURA"].includes(role)
     );
   }
 
-  if (normalizedScope === "ALL") {
-    return roles.some((role) => ["SUPER_ADMIN", "ADMIN"].includes(role));
+  if (normalized === "ALL") {
+    return roles.some((role) => ["SUPER_ADMIN", "ADMIN", "LECTURA"].includes(role));
   }
 
-  return roles.some((role) => ["SUPER_ADMIN", "ADMIN", "CAJERO"].includes(role));
+  // TIENDA
+  return roles.some((role) =>
+    ["SUPER_ADMIN", "ADMIN", "CAJERO", "LECTURA"].includes(role)
+  );
 };
+
+/**
+ * Toma el body de creacion/edicion y deriva un par {catalogo, modulo_origen}
+ * coherente. catalogo manda; si solo viene modulo_origen se traduce.
+ * Retorna undefined si el body no especifica ninguno (no force-write).
+ */
+const resolverCatalogoDesdeBody = (body = {}) => {
+  const rawCatalogo = body.catalogo;
+  const rawModulo = body.modulo_origen;
+
+  if (rawCatalogo !== undefined) {
+    const catalogo = String(rawCatalogo || "GENERAL").trim().toUpperCase();
+    const modulo = catalogo === "PRODUCTOS_TALLER" ? "SERVICIOS" : "GENERAL";
+    return { catalogo, modulo_origen: modulo };
+  }
+
+  if (rawModulo !== undefined) {
+    const modulo = String(rawModulo || "GENERAL").trim().toUpperCase();
+    const catalogo = modulo === "SERVICIOS" ? "PRODUCTOS_TALLER" : "GENERAL";
+    return { catalogo, modulo_origen: modulo };
+  }
+
+  return undefined;
+};
+
+const esCatalogoServicios = (catalogo) =>
+  String(catalogo || "").trim().toUpperCase() === "PRODUCTOS_TALLER";
 
 export const listarProductos = async (req, res) => {
   try {
-    const scope = String(req.query?.scope || "GENERAL").trim().toUpperCase();
-    if (!canAccessScope(req, scope)) {
+    const rawScope = String(req.query?.scope || "TIENDA").trim().toUpperCase();
+
+    if (!canAccessScope(req, rawScope)) {
       return res.status(403).json({ error: "No autorizado para consultar este catalogo" });
     }
 
-    const productos = await Producto.getProductos({ scope });
+    const productos = await Producto.getProductos({ scope: rawScope });
     res.json(productos);
   } catch (error) {
     res.status(500).json({ error: error.message });
@@ -61,17 +109,26 @@ export const crearProducto = async (req, res) => {
       descripcion,
       precio_compra,
       precio_venta,
-      modulo_origen,
       existencia_inicial,
       stock_minimo,
-      ubicacion
+      ubicacion,
     } = req.body;
 
-    const requestedScope = String(modulo_origen || "GENERAL").trim().toUpperCase();
+    // Resolver catalogo/modulo desde el body (con prioridad a catalogo).
+    const resolved =
+      resolverCatalogoDesdeBody(req.body) || {
+        catalogo: "GENERAL",
+        modulo_origen: "GENERAL",
+      };
 
-    if (isServiciosProductManager(req) && !isAdminProductManager(req) && requestedScope !== "SERVICIOS") {
+    // El rol de servicios solo puede crear productos de su catalogo.
+    if (
+      isServiciosProductManager(req) &&
+      !isAdminProductManager(req) &&
+      !esCatalogoServicios(resolved.catalogo)
+    ) {
       return res.status(403).json({
-        error: "Este rol solo puede crear productos del catalogo Tienda",
+        error: "Este rol solo puede crear productos del catalogo Productos de Taller",
       });
     }
 
@@ -81,7 +138,8 @@ export const crearProducto = async (req, res) => {
       descripcion,
       precio_compra,
       precio_venta,
-      modulo_origen: requestedScope,
+      catalogo: resolved.catalogo,
+      modulo_origen: resolved.modulo_origen,
       existencia_inicial: Number(existencia_inicial || 0),
       stock_minimo: Number(stock_minimo || 0),
       ubicacion: ubicacion ?? null,
@@ -111,13 +169,23 @@ export const actualizarProducto = async (req, res) => {
       return res.status(404).json({ error: "Producto no encontrado" });
     }
 
+    // Gate: servicios solo toca los productos de su catalogo.
+    const catalogoActual = String(
+      productoActual.catalogo ||
+        (String(productoActual.modulo_origen || "GENERAL").toUpperCase() === "SERVICIOS"
+          ? "PRODUCTOS_TALLER"
+          : "GENERAL")
+    )
+      .trim()
+      .toUpperCase();
+
     if (
       isServiciosProductManager(req) &&
       !isAdminProductManager(req) &&
-      String(productoActual.modulo_origen || "GENERAL").trim().toUpperCase() !== "SERVICIOS"
+      !esCatalogoServicios(catalogoActual)
     ) {
       return res.status(403).json({
-        error: "Este rol solo puede editar productos del catalogo Tienda",
+        error: "Este rol solo puede editar productos del catalogo Productos de Taller",
       });
     }
 
@@ -128,22 +196,26 @@ export const actualizarProducto = async (req, res) => {
       ...datosProducto
     } = req.body;
 
-    if (datosProducto.modulo_origen !== undefined) {
-      datosProducto.modulo_origen = String(datosProducto.modulo_origen || "GENERAL")
-        .trim()
-        .toUpperCase();
+    // Reconciliar catalogo/modulo_origen del body antes de validar.
+    const resolved = resolverCatalogoDesdeBody(datosProducto);
+    if (resolved) {
+      datosProducto.catalogo = resolved.catalogo;
+      datosProducto.modulo_origen = resolved.modulo_origen;
     }
 
+    // El rol de servicios no puede mover un producto fuera de su catalogo.
     if (isServiciosProductManager(req) && !isAdminProductManager(req)) {
       if (
-        datosProducto.modulo_origen !== undefined &&
-        datosProducto.modulo_origen !== "SERVICIOS"
+        datosProducto.catalogo !== undefined &&
+        !esCatalogoServicios(datosProducto.catalogo)
       ) {
         return res.status(403).json({
-          error: "Este rol solo puede mantener productos como Tienda",
+          error: "Este rol solo puede mantener productos como Productos de Taller",
         });
       }
 
+      // Forzar coherencia.
+      datosProducto.catalogo = "PRODUCTOS_TALLER";
       datosProducto.modulo_origen = "SERVICIOS";
     }
 
@@ -240,13 +312,22 @@ export const eliminarProducto = async (req, res) => {
       return res.status(404).json({ error: "Producto no encontrado" });
     }
 
+    const catalogoActual = String(
+      productoActual.catalogo ||
+        (String(productoActual.modulo_origen || "GENERAL").toUpperCase() === "SERVICIOS"
+          ? "PRODUCTOS_TALLER"
+          : "GENERAL")
+    )
+      .trim()
+      .toUpperCase();
+
     if (
       isServiciosProductManager(req) &&
       !isAdminProductManager(req) &&
-      String(productoActual.modulo_origen || "GENERAL").trim().toUpperCase() !== "SERVICIOS"
+      !esCatalogoServicios(catalogoActual)
     ) {
       return res.status(403).json({
-        error: "Este rol solo puede desactivar productos del catalogo Tienda",
+        error: "Este rol solo puede desactivar productos del catalogo Productos de Taller",
       });
     }
 

@@ -1,6 +1,25 @@
 const isNumber = (value) => typeof value === "number" && Number.isFinite(value);
 
+// Valores validos para el nuevo campo "catalogo".
+const isValidCatalogo = (value) =>
+  ["GENERAL", "TIENDA", "PRODUCTOS_TALLER"].includes(value);
+
+// Legacy: modulo_origen sigue aceptandose durante la transicion.
 const isValidModuloOrigen = (value) => ["GENERAL", "SERVICIOS"].includes(value);
+
+// Deriva catalogo desde modulo_origen cuando el cliente aun no envia catalogo.
+const catalogoDesdeModuloOrigen = (moduloOrigen) => {
+  const norm = String(moduloOrigen || "").trim().toUpperCase();
+  if (norm === "SERVICIOS") return "PRODUCTOS_TALLER";
+  return "GENERAL";
+};
+
+// Inverso: para seguir llenando modulo_origen (dual-write) a partir de catalogo.
+const moduloOrigenDesdeCatalogo = (catalogo) => {
+  const norm = String(catalogo || "").trim().toUpperCase();
+  if (norm === "PRODUCTOS_TALLER") return "SERVICIOS";
+  return "GENERAL";
+};
 
 export const validateProductoCreate = (body) => {
   const errors = [];
@@ -48,12 +67,22 @@ export const validateProductoCreate = (body) => {
     errors.push("precio_venta no puede ser menor que precio_compra");
   }
 
-  if (body.modulo_origen !== undefined) {
+  // catalogo (nuevo) tiene prioridad sobre modulo_origen (legacy).
+  if (body.catalogo !== undefined) {
+    const catalogo = String(body.catalogo || "").trim().toUpperCase();
+    if (!isValidCatalogo(catalogo)) {
+      errors.push("catalogo debe ser GENERAL, TIENDA o PRODUCTOS_TALLER");
+    } else {
+      data.catalogo = catalogo;
+      data.modulo_origen = moduloOrigenDesdeCatalogo(catalogo);
+    }
+  } else if (body.modulo_origen !== undefined) {
     const moduloOrigen = String(body.modulo_origen || "").trim().toUpperCase();
     if (!isValidModuloOrigen(moduloOrigen)) {
       errors.push("modulo_origen debe ser GENERAL o SERVICIOS");
     } else {
       data.modulo_origen = moduloOrigen;
+      data.catalogo = catalogoDesdeModuloOrigen(moduloOrigen);
     }
   }
 
@@ -83,6 +112,7 @@ export const validateProductoUpdate = (body) => {
     "descripcion",
     "precio_compra",
     "precio_venta",
+    "catalogo",
     "modulo_origen",
     "stock_minimo",
     "ubicacion",
@@ -139,12 +169,23 @@ export const validateProductoUpdate = (body) => {
     }
   }
 
-  if (body.modulo_origen !== undefined) {
+  // catalogo tiene prioridad. Si ambos vienen, catalogo gana y modulo_origen se
+  // recalcula. Si solo llega modulo_origen, se deriva catalogo.
+  if (body.catalogo !== undefined) {
+    const catalogo = String(body.catalogo || "").trim().toUpperCase();
+    if (!isValidCatalogo(catalogo)) {
+      errors.push("catalogo debe ser GENERAL, TIENDA o PRODUCTOS_TALLER");
+    } else {
+      data.catalogo = catalogo;
+      data.modulo_origen = moduloOrigenDesdeCatalogo(catalogo);
+    }
+  } else if (body.modulo_origen !== undefined) {
     const moduloOrigen = String(body.modulo_origen || "").trim().toUpperCase();
     if (!isValidModuloOrigen(moduloOrigen)) {
       errors.push("modulo_origen debe ser GENERAL o SERVICIOS");
     } else {
       data.modulo_origen = moduloOrigen;
+      data.catalogo = catalogoDesdeModuloOrigen(moduloOrigen);
     }
   }
 

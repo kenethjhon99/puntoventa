@@ -23,20 +23,46 @@ const buildInternalEan13Candidate = () => {
   return `${base12}${calculateEan13CheckDigit(base12)}`;
 };
 
-export const getProductos = async ({ scope = "GENERAL" } = {}) => {
-  const normalizedScope = String(scope || "GENERAL").trim().toUpperCase();
+/**
+ * Normaliza un scope recibido por query string al conjunto de catalogos
+ * que deben mostrarse. Soporta los nuevos nombres y los legacy.
+ *
+ * Nuevos:
+ *   TIENDA            -> catalogo IN ('TIENDA','PRODUCTOS_TALLER','GENERAL')
+ *   PRODUCTOS_TALLER  -> catalogo = 'PRODUCTOS_TALLER'
+ *   ALL               -> sin filtro
+ *
+ * Legacy (alias):
+ *   GENERAL           -> TIENDA (lo que antes era catalogo de tienda/pos)
+ *   SERVICIOS         -> PRODUCTOS_TALLER
+ *
+ * Durante la transicion, TIENDA tambien incluye productos con
+ * catalogo='GENERAL' (sin clasificar) para no "esconder" productos
+ * viejos que aun no tienen catalogo asignado. Se endurece en Fase 4.
+ */
+const resolveCatalogosVisibles = (scope) => {
+  const s = String(scope || "GENERAL").trim().toUpperCase();
+
+  if (s === "ALL") return null; // null = sin filtro
+  if (s === "PRODUCTOS_TALLER" || s === "SERVICIOS") {
+    return ["PRODUCTOS_TALLER"];
+  }
+  // TIENDA o GENERAL (legacy) o cualquier otro -> catalogo de tienda
+  return ["TIENDA", "PRODUCTOS_TALLER", "GENERAL"];
+};
+
+export const getProductos = async ({ scope = "TIENDA" } = {}) => {
+  const catalogos = resolveCatalogosVisibles(scope);
   const params = [];
   let scopeWhere = "";
 
-  if (normalizedScope === "SERVICIOS") {
-    scopeWhere = `AND COALESCE(p.modulo_origen, 'GENERAL') = $1`;
-    params.push("SERVICIOS");
-  } else if (normalizedScope === "GENERAL") {
-    scopeWhere = `AND COALESCE(p.modulo_origen, 'GENERAL') = $1`;
-    params.push("GENERAL");
+  if (catalogos) {
+    scopeWhere = `AND COALESCE(p.catalogo, 'GENERAL') = ANY($1::text[])`;
+    params.push(catalogos);
   }
 
-  const result = await pool.query(`
+  const result = await pool.query(
+    `
     SELECT
       p.*,
       COALESCE(s.existencia, 0) AS stock,
@@ -50,7 +76,9 @@ export const getProductos = async ({ scope = "GENERAL" } = {}) => {
     WHERE COALESCE(p.activo, true) = true
       ${scopeWhere}
     ORDER BY p.nombre ASC
-  `, params);
+  `,
+    params
+  );
 
   return result.rows;
 };
@@ -80,6 +108,7 @@ export const createProductoConStock = async ({
   descripcion,
   precio_compra,
   precio_venta,
+  catalogo = "GENERAL",
   modulo_origen = "GENERAL",
   existencia_inicial = 0,
   stock_minimo = 0,
@@ -92,16 +121,24 @@ export const createProductoConStock = async ({
   try {
     await client.query("BEGIN");
 
-    // 1) Insert Producto
+    const catalogoNormalizado = String(catalogo || "GENERAL").trim().toUpperCase();
+    const moduloOrigenNormalizado = String(modulo_origen || "GENERAL").trim().toUpperCase();
+
+    // 1) Insert Producto (dual-write: catalogo + modulo_origen)
     const prod = await client.query(
-      'INSERT INTO "Producto" (codigo_barras, nombre, descripcion, precio_compra, precio_venta, modulo_origen, activo, created_by, updated_by) VALUES ($1,$2,$3,$4,$5,$6,true,$7,$7) RETURNING "id_producto"',
+      `INSERT INTO "Producto"
+         (codigo_barras, nombre, descripcion, precio_compra, precio_venta,
+          catalogo, modulo_origen, activo, created_by, updated_by)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,true,$8,$8)
+       RETURNING "id_producto"`,
       [
         codigo_barras,
         nombre,
         descripcion,
         precio_compra,
         precio_venta,
-        String(modulo_origen || "GENERAL").trim().toUpperCase(),
+        catalogoNormalizado,
+        moduloOrigenNormalizado,
         id_usuario,
       ]
     );
