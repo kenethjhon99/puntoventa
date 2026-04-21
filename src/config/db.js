@@ -591,6 +591,10 @@ export async function ensureSchema() {
     END $$;
   `);
 
+  // Tabla traslado (historico, solo lectura desde Fase 4b.2).
+  //   Las columnas legacy modulo_origen / modulo_destino fueron dropeadas
+  //   en Fase 4b.3 (ver bd/migrations/2026-04-20d_drop_traslado_bucket.sql).
+  //   Mantenemos el DDL al dia: sin columnas de bucket ni sus CHECKs.
   await pool.query(`
     CREATE TABLE IF NOT EXISTS traslado (
       id_traslado serial PRIMARY KEY,
@@ -601,8 +605,6 @@ export async function ensureSchema() {
       id_sucursal_destino integer REFERENCES "Sucursal"("Id_sucursal"),
       id_usuario integer NOT NULL REFERENCES "Usuario"(id_usuario),
       id_usuario_recibe integer REFERENCES "Usuario"(id_usuario),
-      modulo_origen character varying(20) NOT NULL DEFAULT 'GENERAL',
-      modulo_destino character varying(20) NOT NULL DEFAULT 'SERVICIOS',
       estado character varying(20) NOT NULL DEFAULT 'RECIBIDO',
       motivo character varying(200),
       observaciones character varying(500),
@@ -613,12 +615,29 @@ export async function ensureSchema() {
       anulada_por integer REFERENCES "Usuario"(id_usuario),
       motivo_anulacion character varying(200),
       CONSTRAINT chk_traslado_estado
-        CHECK (estado IN ('EN_TRANSITO', 'RECIBIDO', 'ANULADO')),
-      CONSTRAINT chk_traslado_modulo_origen
-        CHECK (modulo_origen IN ('GENERAL', 'SERVICIOS')),
-      CONSTRAINT chk_traslado_modulo_destino
-        CHECK (modulo_destino IN ('GENERAL', 'SERVICIOS'))
+        CHECK (estado IN ('EN_TRANSITO', 'RECIBIDO', 'ANULADO'))
     )
+  `);
+
+  // Cleanup para instalaciones previas a Fase 4b.3: drop de CHECKs,
+  // indice compuesto y columnas legacy de bucket. Idempotente.
+  await pool.query(`
+    ALTER TABLE "traslado"
+      DROP CONSTRAINT IF EXISTS chk_traslado_modulo_origen
+  `);
+  await pool.query(`
+    ALTER TABLE "traslado"
+      DROP CONSTRAINT IF EXISTS chk_traslado_modulo_destino
+  `);
+  await pool.query(`DROP INDEX IF EXISTS ix_traslado_bucket`);
+  await pool.query(`DROP INDEX IF EXISTS idx_traslado_modulos`);
+  await pool.query(`
+    ALTER TABLE "traslado"
+      DROP COLUMN IF EXISTS modulo_origen
+  `);
+  await pool.query(`
+    ALTER TABLE "traslado"
+      DROP COLUMN IF EXISTS modulo_destino
   `);
 
   await ensureAuditColumnsForTable("traslado");
@@ -672,10 +691,8 @@ export async function ensureSchema() {
     ON traslado (id_bodega_origen, id_bodega_destino)
   `);
 
-  await pool.query(`
-    CREATE INDEX IF NOT EXISTS "idx_traslado_modulos"
-    ON traslado (modulo_origen, modulo_destino)
-  `);
+  // idx_traslado_modulos removido en Fase 4b.3: las columnas
+  // modulo_origen / modulo_destino ya no existen.
 
   await pool.query(`
     CREATE INDEX IF NOT EXISTS "idx_traslado_detalle_traslado"
