@@ -51,9 +51,9 @@ const canAccessScope = (req, scope) => {
 };
 
 /**
- * Toma el body de creacion/edicion y deriva un par {catalogo, modulo_origen}
- * coherente. catalogo manda; si solo viene modulo_origen se traduce.
- * Retorna undefined si el body no especifica ninguno (no force-write).
+ * Toma el body de creacion/edicion y deriva el catalogo canonico.
+ * Si el body trae `catalogo`, se usa. Si trae el legacy `modulo_origen`,
+ * se traduce. Retorna undefined si el body no especifica ninguno.
  */
 const resolverCatalogoDesdeBody = (body = {}) => {
   const rawCatalogo = body.catalogo;
@@ -61,14 +61,13 @@ const resolverCatalogoDesdeBody = (body = {}) => {
 
   if (rawCatalogo !== undefined) {
     const catalogo = String(rawCatalogo || "GENERAL").trim().toUpperCase();
-    const modulo = catalogo === "PRODUCTOS_TALLER" ? "SERVICIOS" : "GENERAL";
-    return { catalogo, modulo_origen: modulo };
+    return { catalogo };
   }
 
   if (rawModulo !== undefined) {
     const modulo = String(rawModulo || "GENERAL").trim().toUpperCase();
     const catalogo = modulo === "SERVICIOS" ? "PRODUCTOS_TALLER" : "GENERAL";
-    return { catalogo, modulo_origen: modulo };
+    return { catalogo };
   }
 
   return undefined;
@@ -114,12 +113,9 @@ export const crearProducto = async (req, res) => {
       ubicacion,
     } = req.body;
 
-    // Resolver catalogo/modulo desde el body (con prioridad a catalogo).
+    // Resolver catalogo desde el body (acepta alias legacy modulo_origen).
     const resolved =
-      resolverCatalogoDesdeBody(req.body) || {
-        catalogo: "GENERAL",
-        modulo_origen: "GENERAL",
-      };
+      resolverCatalogoDesdeBody(req.body) || { catalogo: "GENERAL" };
 
     // El rol de servicios solo puede crear productos de su catalogo.
     if (
@@ -139,7 +135,6 @@ export const crearProducto = async (req, res) => {
       precio_compra,
       precio_venta,
       catalogo: resolved.catalogo,
-      modulo_origen: resolved.modulo_origen,
       existencia_inicial: Number(existencia_inicial || 0),
       stock_minimo: Number(stock_minimo || 0),
       ubicacion: ubicacion ?? null,
@@ -170,12 +165,7 @@ export const actualizarProducto = async (req, res) => {
     }
 
     // Gate: servicios solo toca los productos de su catalogo.
-    const catalogoActual = String(
-      productoActual.catalogo ||
-        (String(productoActual.modulo_origen || "GENERAL").toUpperCase() === "SERVICIOS"
-          ? "PRODUCTOS_TALLER"
-          : "GENERAL")
-    )
+    const catalogoActual = String(productoActual.catalogo || "GENERAL")
       .trim()
       .toUpperCase();
 
@@ -196,12 +186,13 @@ export const actualizarProducto = async (req, res) => {
       ...datosProducto
     } = req.body;
 
-    // Reconciliar catalogo/modulo_origen del body antes de validar.
+    // Reconciliar catalogo del body antes de validar (tolera alias legacy).
     const resolved = resolverCatalogoDesdeBody(datosProducto);
     if (resolved) {
       datosProducto.catalogo = resolved.catalogo;
-      datosProducto.modulo_origen = resolved.modulo_origen;
     }
+    // Nunca persistimos modulo_origen aunque haya llegado en el body.
+    delete datosProducto.modulo_origen;
 
     // El rol de servicios no puede mover un producto fuera de su catalogo.
     if (isServiciosProductManager(req) && !isAdminProductManager(req)) {
@@ -216,7 +207,6 @@ export const actualizarProducto = async (req, res) => {
 
       // Forzar coherencia.
       datosProducto.catalogo = "PRODUCTOS_TALLER";
-      datosProducto.modulo_origen = "SERVICIOS";
     }
 
     if (
@@ -312,12 +302,7 @@ export const eliminarProducto = async (req, res) => {
       return res.status(404).json({ error: "Producto no encontrado" });
     }
 
-    const catalogoActual = String(
-      productoActual.catalogo ||
-        (String(productoActual.modulo_origen || "GENERAL").toUpperCase() === "SERVICIOS"
-          ? "PRODUCTOS_TALLER"
-          : "GENERAL")
-    )
+    const catalogoActual = String(productoActual.catalogo || "GENERAL")
       .trim()
       .toUpperCase();
 

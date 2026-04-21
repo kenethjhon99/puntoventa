@@ -386,22 +386,14 @@ export async function ensureSchema() {
     END $$;
   `);
 
-  await pool.query(`
-    ALTER TABLE "Producto"
-    ADD COLUMN IF NOT EXISTS modulo_origen character varying(20) NOT NULL DEFAULT 'GENERAL'
-  `);
-
-  await pool.query(`
-    UPDATE "Producto"
-    SET modulo_origen = 'GENERAL'
-    WHERE modulo_origen IS NULL
-       OR BTRIM(modulo_origen) = ''
-  `);
-
   // --------------------------------------------------------------------
   // catalogo de producto (GENERAL / TIENDA / PRODUCTOS_TALLER)
-  // Reemplaza progresivamente a modulo_origen. Espejo de la migracion
-  // bd/migrations/2026-04-20_catalogo_producto.sql. Idempotente.
+  // Reemplazo definitivo de modulo_origen. Espejo de las migraciones
+  //   bd/migrations/2026-04-20_catalogo_producto.sql
+  //   bd/migrations/2026-04-20b_drop_modulo_origen_producto.sql
+  // Idempotente: agrega la columna y CHECK, hace el backfill de
+  // seguridad desde modulo_origen (si todavia existe) y luego dropea
+  // la columna legacy.
   // --------------------------------------------------------------------
   await pool.query(`
     ALTER TABLE "Producto"
@@ -425,16 +417,34 @@ export async function ensureSchema() {
     END $$;
   `);
 
+  // Backfill final desde modulo_origen (solo si la columna aun existe).
   await pool.query(`
-    UPDATE "Producto"
-       SET catalogo = 'PRODUCTOS_TALLER'
-     WHERE UPPER(BTRIM(COALESCE(modulo_origen, ''))) = 'SERVICIOS'
-       AND catalogo = 'GENERAL'
+    DO $$
+    BEGIN
+      IF EXISTS (
+        SELECT 1
+        FROM information_schema.columns
+        WHERE table_schema = 'public'
+          AND table_name   = 'Producto'
+          AND column_name  = 'modulo_origen'
+      ) THEN
+        UPDATE "Producto"
+           SET catalogo = 'PRODUCTOS_TALLER'
+         WHERE UPPER(BTRIM(COALESCE(modulo_origen, ''))) = 'SERVICIOS'
+           AND catalogo = 'GENERAL';
+      END IF;
+    END $$;
   `);
 
   await pool.query(`
     CREATE INDEX IF NOT EXISTS ix_producto_catalogo
     ON "Producto" (catalogo)
+  `);
+
+  // Drop de la columna legacy una vez asegurado el backfill.
+  await pool.query(`
+    ALTER TABLE "Producto"
+    DROP COLUMN IF EXISTS modulo_origen
   `);
 
   await pool.query(`
@@ -518,7 +528,7 @@ export async function ensureSchema() {
             updated_at = now()
         FROM "Producto" p
         WHERE sp.id_producto = p.id_producto
-          AND COALESCE(p.modulo_origen, 'GENERAL') = 'SERVICIOS'
+          AND COALESCE(p.catalogo, 'GENERAL') = 'PRODUCTOS_TALLER'
           AND sp.id_bodega = v_general
           AND NOT EXISTS (
             SELECT 1

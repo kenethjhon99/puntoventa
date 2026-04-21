@@ -773,6 +773,11 @@ export const stockBodega = async (id_bodega) => {
     throw new Error("La bodega seleccionada no pertenece a General o Productos Taller");
   }
 
+  // Mapeo de catalogo -> bucket del traslado:
+  //   PRODUCTOS_TALLER -> SERVICIOS bucket (bodega Productos Taller)
+  //   TIENDA / GENERAL -> GENERAL bucket (bodega General)
+  // Usamos un CASE en SQL para derivar el bucket desde catalogo, ya que
+  // la columna legacy p.modulo_origen fue dropeada en Fase 4a.
   const r = await pool.query(
     `SELECT
         p.id_producto,
@@ -780,14 +785,22 @@ export const stockBodega = async (id_bodega) => {
         p.codigo_barras,
         p.precio_compra,
         p.precio_venta,
-        COALESCE(p.modulo_origen, '${GENERAL_BUCKET}') AS modulo_origen,
+        CASE
+          WHEN COALESCE(p.catalogo, 'GENERAL') = 'PRODUCTOS_TALLER'
+            THEN '${SERVICIOS_BUCKET}'
+          ELSE '${GENERAL_BUCKET}'
+        END AS modulo_origen,
         COALESCE(sp.existencia, 0) AS existencia
      FROM "Producto" p
      LEFT JOIN "Stock_producto" sp
             ON sp.id_producto = p.id_producto
            AND sp.id_bodega   = $1
      WHERE p.activo = true
-       AND COALESCE(p.modulo_origen, '${GENERAL_BUCKET}') = $2
+       AND CASE
+             WHEN COALESCE(p.catalogo, 'GENERAL') = 'PRODUCTOS_TALLER'
+               THEN '${SERVICIOS_BUCKET}'
+             ELSE '${GENERAL_BUCKET}'
+           END = $2
      ORDER BY TRIM(p.nombre) ASC`,
     [Number(id_bodega), bucket]
   );

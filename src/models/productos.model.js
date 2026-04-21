@@ -109,7 +109,6 @@ export const createProductoConStock = async ({
   precio_compra,
   precio_venta,
   catalogo = "GENERAL",
-  modulo_origen = "GENERAL",
   existencia_inicial = 0,
   stock_minimo = 0,
   ubicacion = null,
@@ -122,14 +121,13 @@ export const createProductoConStock = async ({
     await client.query("BEGIN");
 
     const catalogoNormalizado = String(catalogo || "GENERAL").trim().toUpperCase();
-    const moduloOrigenNormalizado = String(modulo_origen || "GENERAL").trim().toUpperCase();
 
-    // 1) Insert Producto (dual-write: catalogo + modulo_origen)
+    // 1) Insert Producto
     const prod = await client.query(
       `INSERT INTO "Producto"
          (codigo_barras, nombre, descripcion, precio_compra, precio_venta,
-          catalogo, modulo_origen, activo, created_by, updated_by)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,true,$8,$8)
+          catalogo, activo, created_by, updated_by)
+       VALUES ($1,$2,$3,$4,$5,$6,true,$7,$7)
        RETURNING "id_producto"`,
       [
         codigo_barras,
@@ -138,7 +136,6 @@ export const createProductoConStock = async ({
         precio_compra,
         precio_venta,
         catalogoNormalizado,
-        moduloOrigenNormalizado,
         id_usuario,
       ]
     );
