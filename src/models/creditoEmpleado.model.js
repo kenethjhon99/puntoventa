@@ -9,7 +9,8 @@ const SELECT_CREDITO = `
     ce.monto,
     ce.saldo_pendiente,
     ce.fecha_credito,
-    ce.fecha_cobro_estimada,
+    ce.fecha_cobro,
+    ce.fecha_cobro AS fecha_cobro_estimada,
     ce.estado,
     ce.observacion,
     ce.motivo_condonacion,
@@ -28,11 +29,11 @@ const SELECT_CREDITO = `
     v.numero_comprobante AS venta_numero_comprobante,
     u_cob.nombre   AS cobrado_por_nombre,
     u_cob.username AS cobrado_por_username,
-    (ce.fecha_cobro_estimada - CURRENT_DATE) AS dias_para_cobro,
+    (ce.fecha_cobro - CURRENT_DATE) AS dias_para_cobro,
     CASE
       WHEN ce.estado != 'PENDIENTE' THEN 'VIGENTE'
-      WHEN ce.fecha_cobro_estimada < CURRENT_DATE THEN 'VENCIDO'
-      WHEN ce.fecha_cobro_estimada <= CURRENT_DATE + INTERVAL '3 days' THEN 'POR_VENCER'
+      WHEN ce.fecha_cobro < CURRENT_DATE THEN 'VENCIDO'
+      WHEN ce.fecha_cobro <= CURRENT_DATE + INTERVAL '3 days' THEN 'POR_VENCER'
       ELSE 'VIGENTE'
     END AS criticidad
   FROM "Credito_empleado" ce
@@ -92,17 +93,26 @@ export const insertCreditoEnTx = async (client, data) => {
       INSERT INTO "Credito_empleado" (
         id_venta,
         id_empleado,
+        tipo_pago,
         monto,
         saldo_pendiente,
-        fecha_cobro_estimada,
+        fecha_cobro,
         observacion,
         created_by,
         updated_by
       )
-      VALUES ($1, $2, $3, $3, $4, $5, $6, $6)
+      VALUES ($1, $2, $3, $4, $4, $5, $6, $7, $7)
       RETURNING *
     `,
-    [id_venta, id_empleado, montoNum.toFixed(2), fechaCobro, observacion, id_usuario]
+    [
+      id_venta,
+      id_empleado,
+      String(empleado.tipo_pago || "").toUpperCase(),
+      montoNum.toFixed(2),
+      fechaCobro,
+      observacion,
+      id_usuario,
+    ]
   );
 
   return { credito: result.rows[0], empleado };
@@ -135,16 +145,16 @@ export const listarCreditos = async (filters = {}) => {
 
   if (filters.criticidad) {
     if (filters.criticidad === "VENCIDO") {
-      where.push(`ce.estado = 'PENDIENTE' AND ce.fecha_cobro_estimada < CURRENT_DATE`);
+      where.push(`ce.estado = 'PENDIENTE' AND ce.fecha_cobro < CURRENT_DATE`);
     } else if (filters.criticidad === "POR_VENCER") {
       where.push(
         `ce.estado = 'PENDIENTE'
-         AND ce.fecha_cobro_estimada >= CURRENT_DATE
-         AND ce.fecha_cobro_estimada <= CURRENT_DATE + INTERVAL '3 days'`
+         AND ce.fecha_cobro >= CURRENT_DATE
+         AND ce.fecha_cobro <= CURRENT_DATE + INTERVAL '3 days'`
       );
     } else if (filters.criticidad === "VIGENTE") {
       where.push(
-        `(ce.estado != 'PENDIENTE' OR ce.fecha_cobro_estimada > CURRENT_DATE + INTERVAL '3 days')`
+        `(ce.estado != 'PENDIENTE' OR ce.fecha_cobro > CURRENT_DATE + INTERVAL '3 days')`
       );
     }
   }
@@ -167,7 +177,7 @@ export const listarCreditos = async (filters = {}) => {
     `
       ${SELECT_CREDITO}
       ${whereSql}
-      ORDER BY ce.fecha_cobro_estimada ASC, ce.id_credito_empleado DESC
+      ORDER BY ce.fecha_cobro ASC, ce.id_credito_empleado DESC
       LIMIT ${limit} OFFSET ${offset}
     `,
     params
@@ -194,16 +204,16 @@ export const getAlertasAdmin = async () => {
     SELECT
       COUNT(*) FILTER (
         WHERE ce.estado = 'PENDIENTE'
-          AND ce.fecha_cobro_estimada < CURRENT_DATE
+          AND ce.fecha_cobro < CURRENT_DATE
       )::int AS vencidos,
       COUNT(*) FILTER (
         WHERE ce.estado = 'PENDIENTE'
-          AND ce.fecha_cobro_estimada >= CURRENT_DATE
-          AND ce.fecha_cobro_estimada <= CURRENT_DATE + INTERVAL '3 days'
+          AND ce.fecha_cobro >= CURRENT_DATE
+          AND ce.fecha_cobro <= CURRENT_DATE + INTERVAL '3 days'
       )::int AS por_vencer,
       COUNT(*) FILTER (
         WHERE ce.estado = 'PENDIENTE'
-          AND ce.fecha_cobro_estimada > CURRENT_DATE + INTERVAL '3 days'
+          AND ce.fecha_cobro > CURRENT_DATE + INTERVAL '3 days'
       )::int AS vigentes,
       COALESCE(SUM(ce.saldo_pendiente) FILTER (
         WHERE ce.estado = 'PENDIENTE'
@@ -214,7 +224,7 @@ export const getAlertasAdmin = async () => {
   const top = await pool.query(`
     ${SELECT_CREDITO}
     WHERE ce.estado = 'PENDIENTE'
-    ORDER BY ce.fecha_cobro_estimada ASC
+    ORDER BY ce.fecha_cobro ASC
     LIMIT 5
   `);
 
@@ -255,6 +265,8 @@ export const getNominaProxima = async () => {
     }
     return {
       ...row,
+      fecha_cobro: fecha_pago_estimada,
+      fecha_cobro_estimada: fecha_pago_estimada,
       fecha_pago_estimada,
     };
   });

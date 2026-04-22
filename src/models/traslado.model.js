@@ -15,6 +15,13 @@ import { pool } from "../config/db.js";
 // ---------------------------------------------------------------------
 
 const folioSql = `('T-' || LPAD(t.id_traslado::text, 5, '0'))`;
+const trasladoCatalogLabelSql = (sourceSql) => `
+  CASE
+    WHEN UPPER(TRIM(COALESCE(${sourceSql}, ''))) IN ('GENERAL', 'PRINCIPAL') THEN 'General'
+    WHEN UPPER(TRIM(COALESCE(${sourceSql}, ''))) IN ('TIENDA', 'TIENDA_TALLER', 'PRODUCTOS_TALLER', 'SERVICIOS', 'TALLER') THEN 'Tienda'
+    ELSE ${sourceSql}
+  END
+`;
 
 // ===================================================================
 // Listar traslados (paginado + filtros)
@@ -103,6 +110,8 @@ export const listarTraslados = async (filters = {}) => {
         ${folioSql} AS folio,
         bo."Nombre" AS bodega_origen_nombre,
         bd."Nombre" AS bodega_destino_nombre,
+        ${trasladoCatalogLabelSql(`bo."Nombre"`)} AS origen_nombre_visible,
+        ${trasladoCatalogLabelSql(`bd."Nombre"`)} AS destino_nombre_visible,
         u.username  AS usuario_username,
         u.nombre    AS usuario_nombre,
         ur.username AS usuario_recibe_username,
@@ -142,6 +151,8 @@ export const getTrasladoCompleto = async (id_traslado) => {
         ${folioSql} AS folio,
         bo."Nombre"    AS bodega_origen_nombre,
         bd."Nombre"    AS bodega_destino_nombre,
+        ${trasladoCatalogLabelSql(`bo."Nombre"`)} AS origen_nombre_visible,
+        ${trasladoCatalogLabelSql(`bd."Nombre"`)} AS destino_nombre_visible,
         so."Nombre"    AS sucursal_origen_nombre,
         so."Direccion" AS sucursal_origen_direccion,
         so."Telefono"  AS sucursal_origen_telefono,
