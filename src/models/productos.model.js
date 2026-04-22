@@ -28,30 +28,31 @@ const buildInternalEan13Candidate = () => {
  * que deben mostrarse. Soporta los nuevos nombres y los legacy.
  *
  * Nuevos:
- *   TIENDA            -> catalogo IN ('TIENDA','PRODUCTOS_TALLER','GENERAL')
+ *   GENERAL           -> catalogo = 'GENERAL'
+ *   TIENDA            -> catalogo IN ('TIENDA','PRODUCTOS_TALLER')
  *   PRODUCTOS_TALLER  -> catalogo = 'PRODUCTOS_TALLER'
  *   ALL               -> sin filtro
  *
  * Legacy (alias):
- *   GENERAL           -> TIENDA (lo que antes era catalogo de tienda/pos)
  *   SERVICIOS         -> PRODUCTOS_TALLER
- *
- * Durante la transicion, TIENDA tambien incluye productos con
- * catalogo='GENERAL' (sin clasificar) para no "esconder" productos
- * viejos que aun no tienen catalogo asignado. Se endurece en Fase 4.
  */
 const resolveCatalogosVisibles = (scope) => {
-  const s = String(scope || "GENERAL").trim().toUpperCase();
+  const s = String(scope || "ALL").trim().toUpperCase();
 
   if (s === "ALL") return null; // null = sin filtro
+  if (s === "GENERAL" || s === "VENTAS") {
+    return ["GENERAL"];
+  }
+  if (s === "TIENDA") {
+    return ["TIENDA", "PRODUCTOS_TALLER"];
+  }
   if (s === "PRODUCTOS_TALLER" || s === "SERVICIOS") {
     return ["PRODUCTOS_TALLER"];
   }
-  // TIENDA o GENERAL (legacy) o cualquier otro -> catalogo de tienda
-  return ["TIENDA", "PRODUCTOS_TALLER", "GENERAL"];
+  return null;
 };
 
-export const getProductos = async ({ scope = "TIENDA" } = {}) => {
+export const getProductos = async ({ scope = "ALL" } = {}) => {
   const catalogos = resolveCatalogosVisibles(scope);
   const params = [];
   let scopeWhere = "";

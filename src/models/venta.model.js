@@ -894,14 +894,17 @@ export const getVentaCompleta = async (id_venta) => {
           ce.id_venta,
           ce.id_empleado,
           ce.monto,
-          ce.saldo_pendiente,
+          CASE
+            WHEN ce.estado = 'PENDIENTE' THEN ce.monto
+            ELSE 0::numeric(12,2)
+          END AS saldo_pendiente,
           (ce.fecha_credito AT TIME ZONE 'America/Guatemala') AS fecha_credito,
           ce.fecha_cobro,
           ce.fecha_cobro AS fecha_cobro_estimada,
           ce.estado,
-          ce.observacion,
-          ce.motivo_condonacion,
-          (ce.cobrado_en AT TIME ZONE 'America/Guatemala') AS cobrado_en,
+          ce.nota_estado AS observacion,
+          ce.nota_estado AS motivo_condonacion,
+          (ce.fecha_cobrado AT TIME ZONE 'America/Guatemala') AS cobrado_en,
           e.nombre    AS empleado_nombre,
           e.cargo     AS empleado_cargo,
           e.tipo_pago AS empleado_tipo_pago

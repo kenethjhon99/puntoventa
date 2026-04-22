@@ -7,14 +7,17 @@ const SELECT_CREDITO = `
     ce.id_venta,
     ce.id_empleado,
     ce.monto,
-    ce.saldo_pendiente,
+    CASE
+      WHEN ce.estado = 'PENDIENTE' THEN ce.monto
+      ELSE 0::numeric(12,2)
+    END AS saldo_pendiente,
     ce.fecha_credito,
     ce.fecha_cobro,
     ce.fecha_cobro AS fecha_cobro_estimada,
     ce.estado,
-    ce.observacion,
-    ce.motivo_condonacion,
-    ce.cobrado_en,
+    ce.nota_estado AS observacion,
+    ce.nota_estado AS motivo_condonacion,
+    ce.fecha_cobrado AS cobrado_en,
     ce.cobrado_por,
     ce.created_at,
     ce.updated_at,
@@ -95,13 +98,12 @@ export const insertCreditoEnTx = async (client, data) => {
         id_empleado,
         tipo_pago,
         monto,
-        saldo_pendiente,
         fecha_cobro,
-        observacion,
+        nota_estado,
         created_by,
         updated_by
       )
-      VALUES ($1, $2, $3, $4, $4, $5, $6, $7, $7)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $7)
       RETURNING *
     `,
     [
@@ -215,9 +217,15 @@ export const getAlertasAdmin = async () => {
         WHERE ce.estado = 'PENDIENTE'
           AND ce.fecha_cobro > CURRENT_DATE + INTERVAL '3 days'
       )::int AS vigentes,
-      COALESCE(SUM(ce.saldo_pendiente) FILTER (
-        WHERE ce.estado = 'PENDIENTE'
-      ), 0)::numeric(18,2) AS saldo_total_pendiente
+      COALESCE(
+        SUM(
+          CASE
+            WHEN ce.estado = 'PENDIENTE' THEN ce.monto
+            ELSE 0::numeric(12,2)
+          END
+        ),
+        0
+      )::numeric(18,2) AS saldo_total_pendiente
     FROM "Credito_empleado" ce
   `);
 
@@ -242,9 +250,15 @@ export const getNominaProxima = async () => {
       e.cargo,
       e.tipo_pago,
       e.activo,
-      COALESCE(SUM(ce.saldo_pendiente) FILTER (
-        WHERE ce.estado = 'PENDIENTE'
-      ), 0)::numeric(18,2) AS total_creditos_pendientes,
+      COALESCE(
+        SUM(
+          CASE
+            WHEN ce.estado = 'PENDIENTE' THEN ce.monto
+            ELSE 0::numeric(12,2)
+          END
+        ),
+        0
+      )::numeric(18,2) AS total_creditos_pendientes,
       COUNT(ce.id_credito_empleado) FILTER (
         WHERE ce.estado = 'PENDIENTE'
       )::int AS num_creditos_pendientes
@@ -278,7 +292,7 @@ export const cobrarCredito = async ({ id_credito_empleado, nota, id_usuario }) =
     await client.query("BEGIN");
 
     const rCur = await client.query(
-      `SELECT id_credito_empleado, estado, saldo_pendiente
+      `SELECT id_credito_empleado, estado, monto
          FROM "Credito_empleado"
         WHERE id_credito_empleado = $1
         FOR UPDATE`,
@@ -297,10 +311,9 @@ export const cobrarCredito = async ({ id_credito_empleado, nota, id_usuario }) =
       `
         UPDATE "Credito_empleado"
            SET estado = 'COBRADO',
-               saldo_pendiente = 0,
-               cobrado_en = now(),
+               fecha_cobrado = now(),
                cobrado_por = $2,
-               observacion = COALESCE($3, observacion),
+               nota_estado = COALESCE($3, nota_estado),
                updated_by = $2,
                updated_at = now()
          WHERE id_credito_empleado = $1
@@ -343,9 +356,8 @@ export const condonarCredito = async ({ id_credito_empleado, motivo, id_usuario 
     const r = await client.query(
       `
         UPDATE "Credito_empleado"
-           SET estado = 'CONDONADO',
-               saldo_pendiente = 0,
-               motivo_condonacion = $2,
+           SET estado = 'CANCELADO',
+               nota_estado = $2,
                updated_by = $3,
                updated_at = now()
          WHERE id_credito_empleado = $1
@@ -366,14 +378,17 @@ export const condonarCredito = async ({ id_credito_empleado, motivo, id_usuario 
 
 /**
  * Helper para que la anulacion de venta marque el credito asociado.
- * Idempotente: si no hay credito o ya esta ANULADO, no hace nada.
+ * Idempotente: si no hay credito o ya esta CANCELADO, no hace nada.
  */
 export const marcarCreditoAnuladoEnTx = async (client, id_venta) => {
   await client.query(
     `
       UPDATE "Credito_empleado"
-         SET estado = 'ANULADO',
-             saldo_pendiente = 0,
+         SET estado = 'CANCELADO',
+             nota_estado = COALESCE(
+               nota_estado,
+               'Credito cancelado por anulacion de venta'
+             ),
              updated_at = now()
        WHERE id_venta = $1
          AND estado = 'PENDIENTE'

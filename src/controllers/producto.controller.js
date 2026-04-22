@@ -15,19 +15,18 @@ const isServiciosProductManager = (req) =>
 
 /**
  * Permiso de lectura por scope.
- *   scope = TIENDA | PRODUCTOS_TALLER | ALL
- *   - TIENDA            -> cualquier rol con acceso a ventas/caja/lectura.
- *   - PRODUCTOS_TALLER  -> admin, cajero, mecanico, encargado_servicios.
+ *   scope = GENERAL | TIENDA | PRODUCTOS_TALLER | ALL
+ *   - GENERAL           -> ventas POS normal.
+ *   - TIENDA            -> modulo Tienda.
+ *   - PRODUCTOS_TALLER  -> modulo Servicios/Reparacion.
  *   - ALL               -> solo admin.
  *
- * Se mantienen los alias GENERAL/SERVICIOS para compatibilidad transitoria:
- *   GENERAL -> TIENDA, SERVICIOS -> PRODUCTOS_TALLER.
+ * Se mantiene SERVICIOS -> PRODUCTOS_TALLER por compatibilidad.
  */
 const normalizeScopeAlias = (scope) => {
   const s = String(scope || "").trim().toUpperCase();
   if (s === "SERVICIOS") return "PRODUCTOS_TALLER";
-  if (!s || s === "GENERAL") return "TIENDA";
-  return s;
+  return s || "ALL";
 };
 
 const canAccessScope = (req, scope) => {
@@ -36,7 +35,13 @@ const canAccessScope = (req, scope) => {
 
   if (normalized === "PRODUCTOS_TALLER") {
     return roles.some((role) =>
-      ["SUPER_ADMIN", "ADMIN", "CAJERO", "MECANICO", "ENCARGADO_SERVICIOS", "LECTURA"].includes(role)
+      ["SUPER_ADMIN", "ADMIN", "MECANICO", "ENCARGADO_SERVICIOS", "LECTURA"].includes(role)
+    );
+  }
+
+  if (normalized === "TIENDA") {
+    return roles.some((role) =>
+      ["SUPER_ADMIN", "ADMIN", "MECANICO", "ENCARGADO_SERVICIOS", "LECTURA"].includes(role)
     );
   }
 
@@ -44,7 +49,7 @@ const canAccessScope = (req, scope) => {
     return roles.some((role) => ["SUPER_ADMIN", "ADMIN", "LECTURA"].includes(role));
   }
 
-  // TIENDA
+  // GENERAL
   return roles.some((role) =>
     ["SUPER_ADMIN", "ADMIN", "CAJERO", "LECTURA"].includes(role)
   );
@@ -78,7 +83,7 @@ const esCatalogoServicios = (catalogo) =>
 
 export const listarProductos = async (req, res) => {
   try {
-    const rawScope = String(req.query?.scope || "TIENDA").trim().toUpperCase();
+    const rawScope = String(req.query?.scope || "ALL").trim().toUpperCase();
 
     if (!canAccessScope(req, rawScope)) {
       return res.status(403).json({ error: "No autorizado para consultar este catalogo" });
