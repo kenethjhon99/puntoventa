@@ -74,7 +74,7 @@ export const listarComprobantesVenta = async () => {
   return result.rows;
 };
 
-export const anularDetalle = async ({ id_venta, id_detalle, cantidad, motivo, id_usuario, id_bodega = 1 }) => {
+export const anularDetalle = async ({ id_venta, id_detalle, cantidad, motivo, id_usuario, id_bodega = null }) => {
   const client = await pool.connect();
 
   try {
@@ -82,9 +82,11 @@ export const anularDetalle = async ({ id_venta, id_detalle, cantidad, motivo, id
 
     // 1) Traer detalle con lock
     const rDet = await client.query(
-      `SELECT id_detalle, id_venta, id_producto, cantidad, cantidad_anulada, precio_unitario
-       FROM "Detalle_venta"
-       WHERE id_detalle = $1 AND id_venta = $2
+      `SELECT dv.id_detalle, dv.id_venta, dv.id_producto, dv.cantidad, dv.cantidad_anulada, dv.precio_unitario,
+              v.id_bodega_stock
+       FROM "Detalle_venta" dv
+       INNER JOIN "Venta" v ON v.id_venta = dv.id_venta
+       WHERE dv.id_detalle = $1 AND dv.id_venta = $2
        FOR UPDATE`,
       [id_detalle, id_venta]
     );
@@ -98,6 +100,11 @@ export const anularDetalle = async ({ id_venta, id_detalle, cantidad, motivo, id
 
     const nueva_anulada = Number(det.cantidad_anulada) + cantidad;
     const nuevo_estado = nueva_anulada === Number(det.cantidad) ? "ANULADO" : "PARCIAL";
+
+    const idBodegaStock = Number(id_bodega || det.id_bodega_stock || 0);
+    if (!Number.isInteger(idBodegaStock) || idBodegaStock <= 0) {
+      throw new Error("La venta no tiene una bodega de stock valida");
+    }
 
     // 2) Actualizar detalle
     await client.query(
@@ -117,7 +124,7 @@ export const anularDetalle = async ({ id_venta, id_detalle, cantidad, motivo, id
        FROM "Stock_producto"
        WHERE id_producto = $1 AND id_bodega = $2
        FOR UPDATE`,
-      [det.id_producto, id_bodega]
+      [det.id_producto, idBodegaStock]
     );
     if (rStock.rowCount === 0) throw new Error("No existe stock para este producto en la bodega");
 
@@ -128,7 +135,7 @@ export const anularDetalle = async ({ id_venta, id_detalle, cantidad, motivo, id
       `UPDATE "Stock_producto"
        SET existencia = $1
        WHERE id_producto = $2 AND id_bodega = $3`,
-      [despues, det.id_producto, id_bodega]
+      [despues, det.id_producto, idBodegaStock]
     );
 
     // 4) Movimiento stock (ENTRADA por anulación)
@@ -136,7 +143,7 @@ export const anularDetalle = async ({ id_venta, id_detalle, cantidad, motivo, id
       `INSERT INTO "Movimiento_stock"
        (tipo, motivo, cantidad, existencia_antes, existencia_despues, id_producto, id_bodega, id_usuario)
        VALUES ('ENTRADA', $1, $2, $3, $4, $5, $6, $7)`,
-      [`Anulación venta #${id_venta} detalle #${id_detalle}`, cantidad, antes, despues, det.id_producto, id_bodega, id_usuario]
+      [`Anulación venta #${id_venta} detalle #${id_detalle}`, cantidad, antes, despues, det.id_producto, idBodegaStock, id_usuario]
     );
 
     await client.query(
@@ -191,7 +198,7 @@ export const anularVentaCompleta = async ({
   id_venta,
   motivo,
   id_usuario,
-  id_bodega = 1,
+  id_bodega = null,
 }) => {
   const client = await pool.connect();
 
@@ -200,7 +207,7 @@ export const anularVentaCompleta = async ({
 
     const rVenta = await client.query(
       `
-        SELECT id_venta, estado
+        SELECT id_venta, estado, id_bodega_stock
         FROM "Venta"
         WHERE id_venta = $1
         FOR UPDATE
@@ -214,6 +221,11 @@ export const anularVentaCompleta = async ({
 
     if (rVenta.rows[0].estado === "ANULADA") {
       throw new Error("La venta ya se encuentra anulada");
+    }
+
+    const idBodegaStock = Number(id_bodega || rVenta.rows[0].id_bodega_stock || 0);
+    if (!Number.isInteger(idBodegaStock) || idBodegaStock <= 0) {
+      throw new Error("La venta no tiene una bodega de stock valida");
     }
 
     const rDetalles = await client.query(
@@ -247,7 +259,7 @@ export const anularVentaCompleta = async ({
           WHERE id_producto = $1 AND id_bodega = $2
           FOR UPDATE
         `,
-        [detalle.id_producto, id_bodega]
+        [detalle.id_producto, idBodegaStock]
       );
 
       if (rStock.rowCount === 0) {
@@ -263,7 +275,7 @@ export const anularVentaCompleta = async ({
           SET existencia = $1
           WHERE id_producto = $2 AND id_bodega = $3
         `,
-        [despues, detalle.id_producto, id_bodega]
+        [despues, detalle.id_producto, idBodegaStock]
       );
 
       await client.query(
@@ -272,7 +284,7 @@ export const anularVentaCompleta = async ({
           (tipo, motivo, cantidad, existencia_antes, existencia_despues, id_producto, id_bodega, id_usuario)
           VALUES ('ENTRADA', $1, $2, $3, $4, $5, $6, $7)
         `,
-        [`Anulacion total venta #${id_venta}`, cantidadPendiente, antes, despues, detalle.id_producto, id_bodega, id_usuario]
+        [`Anulacion total venta #${id_venta}`, cantidadPendiente, antes, despues, detalle.id_producto, idBodegaStock, id_usuario]
       );
 
       await client.query(
@@ -350,7 +362,7 @@ export const crearVenta = async ({
   id_empleado_credito = null,
   observacion_credito = null,
   items,
-  id_bodega = 1,
+  id_bodega,
 }) => {
   const client = await pool.connect();
 
@@ -424,6 +436,11 @@ export const crearVenta = async ({
       }
     }
 
+    const idBodegaStock = Number(id_bodega || 0);
+    if (!Number.isInteger(idBodegaStock) || idBodegaStock <= 0) {
+      throw new Error("No se pudo determinar la bodega de stock para la venta");
+    }
+
     const rVenta = await client.query(
   `INSERT INTO "Venta"(
       fecha,
@@ -433,6 +450,7 @@ export const crearVenta = async ({
       id_sucursal,
       id_usuario,
       id_caja_sesion,
+      id_bodega_stock,
       id_cliente,
       estado,
       id_comprobante_serie,
@@ -453,16 +471,16 @@ export const crearVenta = async ({
       id_empleado_credito
     )
    VALUES (
-      now(), 0, $1, $2, $3, $4, $5, $6, $7,
-      $8, $9, $10, $11, $12, NULL, 0, $13, 0,
-      $14, $15, CASE WHEN $16 THEN now() ELSE NULL END, NULL, NULL, NULL,
-      $17
+      now(), 0, $1, $2, $3, $4, $5, $6, $7, $8,
+      $9, $10, $11, $12, $13, NULL, 0, $14, 0,
+      $15, $16, CASE WHEN $17 THEN now() ELSE NULL END, NULL, NULL, NULL,
+      $18
    )
    RETURNING id_venta,
             (fecha AT TIME ZONE 'America/Guatemala') AS fecha,
             total, tipo_venta, metodo_pago, id_sucursal, id_usuario, id_caja_sesion, id_cliente, estado,
             id_comprobante_serie, tipo_comprobante, serie_comprobante, correlativo_comprobante, numero_comprobante,
-            monto_recibido, cambio_entregado,
+            monto_recibido, cambio_entregado, id_bodega_stock,
             (anulada_en AT TIME ZONE 'America/Guatemala') AS anulada_en,
             anulada_por, motivo_anulacion,
             descuento_porcentaje, descuento_total,
@@ -477,6 +495,7 @@ export const crearVenta = async ({
     id_sucursal,
     id_usuario,
     id_caja_sesion,
+    idBodegaStock,
     esCreditoEmpleado ? null : id_cliente,
     ventaSinCobro ? "NO_COBRADO" : "COMPLETADA",
     comprobante.id_comprobante_serie,
@@ -525,9 +544,9 @@ export const crearVenta = async ({
          FROM "Stock_producto"
          WHERE id_producto = $1 AND id_bodega = $2
          FOR UPDATE`,
-        [id_producto, id_bodega]
+         [id_producto, idBodegaStock]
       );
-      if (rStock.rowCount === 0) throw new Error(`No hay stock para producto ${id_producto} en bodega ${id_bodega}`);
+      if (rStock.rowCount === 0) throw new Error(`No hay stock para producto ${id_producto} en bodega ${idBodegaStock}`);
 
       const antes = Number(rStock.rows[0].existencia);
       if (antes < cantidad) throw new Error(`Stock insuficiente para "${nombreProd}". Disponible: ${antes}`);
@@ -585,14 +604,14 @@ export const crearVenta = async ({
         `UPDATE "Stock_producto"
          SET existencia = $1
          WHERE id_producto = $2 AND id_bodega = $3`,
-        [despues, id_producto, id_bodega]
+         [despues, id_producto, idBodegaStock]
       );
 
       await client.query(
         `INSERT INTO "Movimiento_stock"
          (tipo, motivo, cantidad, existencia_antes, existencia_despues, id_producto, id_bodega, id_usuario)
          VALUES ('SALIDA', $1, $2, $3, $4, $5, $6, $7)`,
-        [`Venta #${venta.id_venta}`, cantidad, antes, despues, id_producto, id_bodega, id_usuario]
+         [`Venta #${venta.id_venta}`, cantidad, antes, despues, id_producto, idBodegaStock, id_usuario]
       );
     }
 

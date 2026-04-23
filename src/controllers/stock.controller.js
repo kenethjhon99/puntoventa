@@ -1,16 +1,22 @@
 import * as Stock from "../models/stock.model.js";
 
+const normalizeBodegaOptions = (source = {}) => ({
+  id_bodega: source.id_bodega ? Number(source.id_bodega) : null,
+  bodega_key: source.bodega_key ? String(source.bodega_key).trim() : null,
+});
+
 export const listarStock = async (req, res) => {
   try {
     const { q, solo_bajo_minimo } = req.query;
     const stock = await Stock.getStock({
-      id_bodega: 1,
+      ...normalizeBodegaOptions(req.query),
       q: q ? String(q).trim() : "",
       solo_bajo_minimo:
         solo_bajo_minimo === "true" ||
         solo_bajo_minimo === "1" ||
         solo_bajo_minimo === true,
     });
+
     res.json(stock);
   } catch (error) {
     res.status(500).json({ error: error.message });
@@ -22,57 +28,75 @@ export const ajustarStock = async (req, res) => {
     const { id_producto } = req.params;
     const { existencia } = req.body;
 
-    // Validar id_producto
     if (!/^\d+$/.test(id_producto)) {
-      return res.status(400).json({ error: "id_producto inválido" });
+      return res.status(400).json({ error: "id_producto invalido" });
     }
 
-    // Validar existencia
     const ex = Number(existencia);
     if (!Number.isInteger(ex) || ex < 0) {
       return res.status(400).json({ error: "existencia debe ser entero >= 0" });
     }
 
-    // Verificar que exista el stock (para bodega 1)
-    const actual = await Stock.getStockByProducto(id_producto, 1);
+    const bodegaOptions = normalizeBodegaOptions(req.body);
+    const actual = await Stock.getStockByProducto(
+      Number(id_producto),
+      bodegaOptions.id_bodega,
+      { bodega_key: bodegaOptions.bodega_key }
+    );
+
     if (!actual) {
-      return res.status(404).json({ error: "No existe registro de stock para este producto en bodega 1" });
+      return res.status(404).json({
+        error: "No existe registro de stock para este producto en la bodega indicada",
+      });
     }
 
-    // Actualizar
-    const actualizado = await Stock.setExistencia(id_producto, ex, 1);
+    const actualizado = await Stock.setExistencia(
+      Number(id_producto),
+      ex,
+      bodegaOptions.id_bodega,
+      { bodega_key: bodegaOptions.bodega_key }
+    );
 
     res.json({
       ok: true,
       mensaje: "Stock actualizado",
       antes: actual.existencia,
       despues: actualizado.existencia,
-      data: actualizado
+      data: actualizado,
     });
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    res.status(400).json({ error: error.message });
   }
 };
 
 export const crearMovimiento = async (req, res) => {
   try {
-    const { id_producto, tipo, motivo, cantidad, nueva_existencia } = req.body;
+    const {
+      id_producto,
+      tipo,
+      motivo,
+      cantidad,
+      nueva_existencia,
+    } = req.body;
 
     if (!Number.isInteger(Number(id_producto))) {
-      return res.status(400).json({ error: "id_producto inválido" });
+      return res.status(400).json({ error: "id_producto invalido" });
     }
 
-    const payload = {
+    const bodegaOptions = normalizeBodegaOptions(req.body);
+
+    const result = await Stock.crearMovimientoStock({
       id_producto: Number(id_producto),
-      id_bodega: 1,
+      id_bodega: bodegaOptions.id_bodega,
+      bodega_key: bodegaOptions.bodega_key,
       tipo,
       motivo: motivo ?? null,
       cantidad: cantidad !== undefined ? Number(cantidad) : undefined,
-      nueva_existencia: nueva_existencia !== undefined ? Number(nueva_existencia) : null,
-      id_usuario: req.user.id_usuario, // cuando tengas login, aquí va el usuario del token
-    };
+      nueva_existencia:
+        nueva_existencia !== undefined ? Number(nueva_existencia) : null,
+      id_usuario: req.user.id_usuario,
+    });
 
-    const result = await Stock.crearMovimientoStock(payload);
     res.status(201).json({ ok: true, ...result });
   } catch (error) {
     res.status(400).json({ error: error.message });
@@ -84,8 +108,8 @@ export const listarMovimientos = async (req, res) => {
     const { id_producto, limit, tipo, desde, hasta, q } = req.query;
 
     const data = await Stock.getMovimientosStock({
+      ...normalizeBodegaOptions(req.query),
       id_producto: id_producto ? Number(id_producto) : null,
-      id_bodega: 1,
       tipo: tipo ? String(tipo).trim().toUpperCase() : null,
       desde: desde ? String(desde).trim() : null,
       hasta: hasta ? String(hasta).trim() : null,

@@ -1,5 +1,7 @@
 import { pool } from "../config/db.js";
 import { getCajaSesionActiva } from "./caja.model.js";
+import { BODEGA_TIENDA_TALLER } from "../constants/inventory.js";
+import { requireBodegaLogicaByKey } from "./bodega.model.js";
 
 const MODULO_AUTOLAVADO = "AUTOLAVADO";
 const MODULO_REPARACION = "REPARACION";
@@ -751,7 +753,11 @@ export const registrarCobroReparacion = async ({
   try {
     await client.query("BEGIN");
 
-    const idBodega = Number(idSucursal || 1);
+    const bodegaTiendaTaller = await requireBodegaLogicaByKey(
+      BODEGA_TIENDA_TALLER,
+      client
+    );
+    const idBodega = Number(bodegaTiendaTaller.id_bodega);
     const detallesProductos = [];
     let totalProductosCobrados = 0;
 
@@ -1276,7 +1282,11 @@ export const agregarProductoOrdenReparacion = async ({
       );
     }
 
-    const idBodega = Number(orden.id_sucursal || 1);
+    const bodegaTiendaTaller = await requireBodegaLogicaByKey(
+      BODEGA_TIENDA_TALLER,
+      client
+    );
+    const idBodega = Number(bodegaTiendaTaller.id_bodega);
 
     const productoResult = await client.query(
       `

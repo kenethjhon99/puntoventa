@@ -1,10 +1,15 @@
 import * as Venta from "../models/venta.model.js";
 import { getCajaSesionActiva } from "../models/caja.model.js";
 import { addLocalDates } from "../utils/datetime.js";
+import { getBodegaKeyForScope } from "../constants/inventory.js";
+import { requireBodegaLogicaByKey } from "../models/bodega.model.js";
 import {
   normalizeVentaPayload,
   validateVentaPayload,
 } from "../validators/venta.validator.js";
+
+const resolveVentaWarehouseByScope = async (scope = "GENERAL") =>
+  requireBodegaLogicaByKey(getBodegaKeyForScope(scope));
 
 export const anularDetalleVenta = async (req, res) => {
   try {
@@ -15,13 +20,18 @@ export const anularDetalleVenta = async (req, res) => {
       return res.status(400).json({ error: "IDs inválidos" });
     }
 
+    const venta = await Venta.getVentaById(Number(id_venta));
+    if (!venta) {
+      return res.status(404).json({ error: "Venta no encontrada" });
+    }
+
     const result = await Venta.anularDetalle({
       id_venta: Number(id_venta),
       id_detalle: Number(id_detalle),
       cantidad: Number(cantidad),
       motivo,
       id_usuario: req.user.id_usuario,
-      id_bodega: 1
+      id_bodega: Number(venta.id_bodega_stock || 0) || null,
     });
 
     res.json(result);
@@ -45,11 +55,16 @@ export const anularVentaCompleta = async (req, res) => {
       return res.status(400).json({ error: "motivo es requerido" });
     }
 
+    const ventaActual = await Venta.getVentaById(Number(id_venta));
+    if (!ventaActual) {
+      return res.status(404).json({ error: "Venta no encontrada" });
+    }
+
     const venta = await Venta.anularVentaCompleta({
       id_venta: Number(id_venta),
       motivo,
       id_usuario: req.user.id_usuario,
-      id_bodega: 1,
+      id_bodega: Number(ventaActual.id_bodega_stock || 0) || null,
     });
 
     res.json({ ok: true, venta });
@@ -73,6 +88,10 @@ export const crearVenta = async (req, res) => {
       });
     }
 
+    const bodegaStock = await resolveVentaWarehouseByScope(
+      payload.stock_scope || "GENERAL"
+    );
+
     const venta = await Venta.crearVenta({
       id_usuario: req.user.id_usuario,
       id_sucursal: payload.id_sucursal,
@@ -89,7 +108,7 @@ export const crearVenta = async (req, res) => {
       id_empleado_credito: payload.id_empleado_credito,
       observacion_credito: payload.observacion_credito,
       items: payload.items,
-      id_bodega: 1
+      id_bodega: Number(bodegaStock.id_bodega),
     });
 
     res.status(201).json({ ok: true, venta });

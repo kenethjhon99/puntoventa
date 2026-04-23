@@ -448,114 +448,255 @@ export async function ensureSchema() {
   `);
 
   // --------------------------------------------------------------------
-  // Bodega unica PRINCIPAL.
-  // Fase 4b.1 consolido las dos bodegas historicas (GENERAL y
-  // PRODUCTOS_TALLER) en una sola "PRINCIPAL". Este bloque:
-  //   1. Garantiza que exista una bodega PRINCIPAL, renombrando
-  //      GENERAL -> PRINCIPAL si hace falta. Si no hay bodegas, crea
-  //      una nueva PRINCIPAL.
-  //   2. Si todavia existe una bodega "PRODUCTOS_TALLER" (instalaciones
-  //      viejas), consolida su stock en PRINCIPAL y reapunta el kardex
-  //      historico. No borra la fila de Bodega: queda como "ghost" para
-  //      mantener FK integrity de la tabla "traslado" historica.
-  // Espejo de bd/migrations/2026-04-20c_consolidar_stock_principal.sql.
-  // Idempotente.
+  // Dos bodegas logicas activas:
+  //   - GENERAL
+  //   - TIENDA_TALLER
+  //
+  // El inventario sigue siendo fisicamente uno, pero operativamente:
+  //   - Ventas consume de GENERAL
+  //   - Tienda y Servicios consumen de TIENDA_TALLER
+  //
+  // Esta migracion:
+  //   1. Garantiza que existan ambas bodegas logicas.
+  //   2. Convierte instalaciones viejas con PRINCIPAL a GENERAL.
+  //   3. Reparte el stock actual por catalogo sin duplicarlo.
+  //   4. Consolida bodegas legacy de tienda/taller en TIENDA_TALLER.
+  //   5. Reapunta el kardex historico a la bodega logica correcta.
   // --------------------------------------------------------------------
   await pool.query(`
     DO $$
     DECLARE
       v_sucursal integer;
-      v_principal integer;
-      v_taller integer;
+      v_general integer;
+      v_tienda_taller integer;
+      v_legacy record;
     BEGIN
       SELECT COALESCE(MIN("Id_sucursal"), 1)
       INTO v_sucursal
       FROM "Sucursal";
 
-      -- Renombrar GENERAL -> PRINCIPAL si es necesario.
+      -- Si existe PRINCIPAL pero no GENERAL, PRINCIPAL pasa a ser GENERAL.
       IF EXISTS (
         SELECT 1 FROM "Bodega"
-        WHERE UPPER(BTRIM("Nombre")) = 'GENERAL'
+        WHERE UPPER(BTRIM("Nombre")) = 'PRINCIPAL'
       ) AND NOT EXISTS (
         SELECT 1 FROM "Bodega"
-        WHERE UPPER(BTRIM("Nombre")) = 'PRINCIPAL'
+        WHERE UPPER(BTRIM("Nombre")) = 'GENERAL'
       ) THEN
         UPDATE "Bodega"
-           SET "Nombre" = 'PRINCIPAL'
-         WHERE UPPER(BTRIM("Nombre")) = 'GENERAL';
+           SET "Nombre" = 'GENERAL'
+         WHERE UPPER(BTRIM("Nombre")) = 'PRINCIPAL';
       END IF;
 
-      -- Si no existe ninguna bodega, crear PRINCIPAL.
+      -- Si no existe ninguna bodega, crear ambas.
       IF NOT EXISTS (
         SELECT 1 FROM "Bodega"
-        WHERE UPPER(BTRIM("Nombre")) = 'PRINCIPAL'
+        WHERE UPPER(BTRIM("Nombre")) = 'GENERAL'
       ) AND (SELECT COUNT(*) FROM "Bodega") = 0 THEN
         INSERT INTO "Bodega"("Nombre", id_sucursal)
-        VALUES ('PRINCIPAL', v_sucursal);
+        VALUES ('GENERAL', v_sucursal);
       END IF;
 
-      -- Si hay al menos una bodega pero ninguna se llama PRINCIPAL,
+      IF NOT EXISTS (
+        SELECT 1 FROM "Bodega"
+        WHERE UPPER(BTRIM("Nombre")) = 'TIENDA_TALLER'
+      ) AND (SELECT COUNT(*) FROM "Bodega") <= 1 THEN
+        INSERT INTO "Bodega"("Nombre", id_sucursal)
+        VALUES ('TIENDA_TALLER', v_sucursal);
+      END IF;
+
+      -- Si hay al menos una bodega pero ninguna se llama GENERAL,
       -- rebautizar la de id mas bajo.
       IF NOT EXISTS (
         SELECT 1 FROM "Bodega"
-        WHERE UPPER(BTRIM("Nombre")) = 'PRINCIPAL'
+        WHERE UPPER(BTRIM("Nombre")) = 'GENERAL'
       ) THEN
         UPDATE "Bodega"
-        SET "Nombre" = 'PRINCIPAL'
+        SET "Nombre" = 'GENERAL'
         WHERE id_bodega = (
           SELECT id_bodega FROM "Bodega" ORDER BY id_bodega LIMIT 1
         );
       END IF;
 
       SELECT id_bodega
-        INTO v_principal
+        INTO v_general
         FROM "Bodega"
-       WHERE UPPER(BTRIM("Nombre")) = 'PRINCIPAL'
+       WHERE UPPER(BTRIM("Nombre")) = 'GENERAL'
        ORDER BY id_bodega
        LIMIT 1;
 
       SELECT id_bodega
-        INTO v_taller
+        INTO v_tienda_taller
         FROM "Bodega"
-       WHERE UPPER(BTRIM("Nombre")) = 'PRODUCTOS_TALLER'
+       WHERE UPPER(BTRIM("Nombre")) = 'TIENDA_TALLER'
        ORDER BY id_bodega
        LIMIT 1;
 
-      -- Consolidacion de stock TALLER -> PRINCIPAL (solo si existe
-      -- todavia la bodega TALLER y es distinta a PRINCIPAL).
-      IF v_principal IS NOT NULL
-         AND v_taller IS NOT NULL
-         AND v_taller <> v_principal THEN
+      IF v_tienda_taller IS NULL THEN
+        INSERT INTO "Bodega"("Nombre", id_sucursal)
+        VALUES ('TIENDA_TALLER', v_sucursal)
+        RETURNING id_bodega INTO v_tienda_taller;
+      END IF;
 
-        -- Sumar existencias de productos presentes en ambas bodegas.
+      -- Consolidar bodegas legacy de tienda/taller dentro de TIENDA_TALLER.
+      FOR v_legacy IN
+        SELECT id_bodega, UPPER(BTRIM("Nombre")) AS nombre_bodega
+        FROM "Bodega"
+        WHERE UPPER(BTRIM("Nombre")) IN ('TIENDA', 'PRODUCTOS_TALLER', 'SERVICIOS', 'TALLER')
+          AND id_bodega <> v_tienda_taller
+      LOOP
         UPDATE "Stock_producto" sp_dest
            SET existencia = COALESCE(sp_dest.existencia, 0)
                           + COALESCE(sp_src.existencia, 0),
                updated_at = now()
           FROM "Stock_producto" sp_src
-         WHERE sp_dest.id_bodega = v_principal
-           AND sp_src.id_bodega  = v_taller
+         WHERE sp_dest.id_bodega = v_tienda_taller
+           AND sp_src.id_bodega  = v_legacy.id_bodega
            AND sp_dest.id_producto = sp_src.id_producto;
 
-        -- Borrar filas de TALLER ya consolidadas.
         DELETE FROM "Stock_producto" sp
          USING "Stock_producto" sp2
-         WHERE sp.id_bodega  = v_taller
-           AND sp2.id_bodega = v_principal
+         WHERE sp.id_bodega = v_legacy.id_bodega
+           AND sp2.id_bodega = v_tienda_taller
            AND sp.id_producto = sp2.id_producto;
 
-        -- Mover filas de TALLER que no tenian contraparte.
         UPDATE "Stock_producto"
-           SET id_bodega  = v_principal,
+           SET id_bodega = v_tienda_taller,
                updated_at = now()
-         WHERE id_bodega = v_taller;
+         WHERE id_bodega = v_legacy.id_bodega;
 
-        -- Reapuntar kardex historico.
         UPDATE "Movimiento_stock"
-           SET id_bodega = v_principal
-         WHERE id_bodega = v_taller;
-      END IF;
+           SET id_bodega = v_tienda_taller
+         WHERE id_bodega = v_legacy.id_bodega;
+      END LOOP;
+
+      -- Repartir stock de GENERAL segun el catalogo real del producto.
+      -- Lo que sea TIENDA o PRODUCTOS_TALLER debe vivir en TIENDA_TALLER.
+      INSERT INTO "Stock_producto" (
+        existencia,
+        stock_minimo,
+        ubicacion,
+        id_producto,
+        id_bodega,
+        created_at,
+        updated_at,
+        created_by,
+        updated_by
+      )
+      SELECT
+        sp.existencia,
+        sp.stock_minimo,
+        sp.ubicacion,
+        sp.id_producto,
+        v_tienda_taller,
+        COALESCE(sp.created_at, now()),
+        now(),
+        sp.created_by,
+        sp.updated_by
+      FROM "Stock_producto" sp
+      INNER JOIN "Producto" p
+        ON p.id_producto = sp.id_producto
+      WHERE sp.id_bodega = v_general
+        AND COALESCE(p.catalogo, 'GENERAL') IN ('TIENDA', 'PRODUCTOS_TALLER')
+        AND NOT EXISTS (
+          SELECT 1
+          FROM "Stock_producto" sp2
+          WHERE sp2.id_producto = sp.id_producto
+            AND sp2.id_bodega = v_tienda_taller
+        );
+
+      UPDATE "Stock_producto" sp_dest
+         SET existencia = COALESCE(sp_dest.existencia, 0) + COALESCE(sp_src.existencia, 0),
+             updated_at = now()
+        FROM "Stock_producto" sp_src
+        INNER JOIN "Producto" p
+          ON p.id_producto = sp_src.id_producto
+       WHERE sp_dest.id_producto = sp_src.id_producto
+         AND sp_dest.id_bodega = v_tienda_taller
+         AND sp_src.id_bodega = v_general
+         AND COALESCE(p.catalogo, 'GENERAL') IN ('TIENDA', 'PRODUCTOS_TALLER')
+         AND sp_dest.id_stock <> sp_src.id_stock;
+
+      DELETE FROM "Stock_producto" sp
+      USING "Producto" p
+      WHERE p.id_producto = sp.id_producto
+        AND sp.id_bodega = v_general
+        AND COALESCE(p.catalogo, 'GENERAL') IN ('TIENDA', 'PRODUCTOS_TALLER');
+
+      -- Si por instalaciones previas quedo algun producto GENERAL en TIENDA_TALLER,
+      -- devolverlo a GENERAL.
+      INSERT INTO "Stock_producto" (
+        existencia,
+        stock_minimo,
+        ubicacion,
+        id_producto,
+        id_bodega,
+        created_at,
+        updated_at,
+        created_by,
+        updated_by
+      )
+      SELECT
+        sp.existencia,
+        sp.stock_minimo,
+        sp.ubicacion,
+        sp.id_producto,
+        v_general,
+        COALESCE(sp.created_at, now()),
+        now(),
+        sp.created_by,
+        sp.updated_by
+      FROM "Stock_producto" sp
+      INNER JOIN "Producto" p
+        ON p.id_producto = sp.id_producto
+      WHERE sp.id_bodega = v_tienda_taller
+        AND COALESCE(p.catalogo, 'GENERAL') = 'GENERAL'
+        AND NOT EXISTS (
+          SELECT 1
+          FROM "Stock_producto" sp2
+          WHERE sp2.id_producto = sp.id_producto
+            AND sp2.id_bodega = v_general
+        );
+
+      UPDATE "Stock_producto" sp_dest
+         SET existencia = COALESCE(sp_dest.existencia, 0) + COALESCE(sp_src.existencia, 0),
+             updated_at = now()
+        FROM "Stock_producto" sp_src
+        INNER JOIN "Producto" p
+          ON p.id_producto = sp_src.id_producto
+       WHERE sp_dest.id_producto = sp_src.id_producto
+         AND sp_dest.id_bodega = v_general
+         AND sp_src.id_bodega = v_tienda_taller
+         AND COALESCE(p.catalogo, 'GENERAL') = 'GENERAL'
+         AND sp_dest.id_stock <> sp_src.id_stock;
+
+      DELETE FROM "Stock_producto" sp
+      USING "Producto" p
+      WHERE p.id_producto = sp.id_producto
+        AND sp.id_bodega = v_tienda_taller
+        AND COALESCE(p.catalogo, 'GENERAL') = 'GENERAL';
+
+      -- Reapuntar kardex historico segun el catalogo actual del producto.
+      UPDATE "Movimiento_stock" ms
+         SET id_bodega = CASE
+           WHEN COALESCE(p.catalogo, 'GENERAL') = 'GENERAL' THEN v_general
+           ELSE v_tienda_taller
+         END
+        FROM "Producto" p,
+             "Bodega" b
+       WHERE p.id_producto = ms.id_producto
+         AND b.id_bodega = ms.id_bodega
+         AND UPPER(BTRIM(b."Nombre")) IN ('GENERAL', 'PRINCIPAL', 'TIENDA', 'PRODUCTOS_TALLER', 'SERVICIOS', 'TALLER')
+         AND ms.id_bodega <> CASE
+           WHEN COALESCE(p.catalogo, 'GENERAL') = 'GENERAL' THEN v_general
+           ELSE v_tienda_taller
+         END;
     END $$;
+  `);
+
+  await pool.query(`
+    CREATE UNIQUE INDEX IF NOT EXISTS "uq_stock_producto_bodega"
+    ON "Stock_producto" (id_producto, id_bodega)
   `);
 
   await pool.query(`
@@ -718,6 +859,11 @@ export async function ensureSchema() {
   await pool.query(`
     ALTER TABLE "Venta"
     ADD COLUMN IF NOT EXISTS id_caja_sesion integer
+  `);
+
+  await pool.query(`
+    ALTER TABLE "Venta"
+    ADD COLUMN IF NOT EXISTS id_bodega_stock integer
   `);
 
   await pool.query(`

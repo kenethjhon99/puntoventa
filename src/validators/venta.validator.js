@@ -29,6 +29,7 @@ export const normalizeVentaPayload = (body = {}) => ({
     body.descuento_porcentaje == null || body.descuento_porcentaje === ""
       ? 0
       : Number(body.descuento_porcentaje),
+  stock_scope: String(body.stock_scope || "").trim().toUpperCase() || null,
   id_empleado_credito: normalizeOptionalInteger(body.id_empleado_credito),
   observacion_credito:
     String(body.observacion_credito || "").trim().slice(0, 250) || null,
@@ -78,6 +79,13 @@ export const validateVentaPayload = (payload) => {
     return "descuento_porcentaje debe estar entre 0 y 100";
   }
 
+  if (
+    payload.stock_scope !== null &&
+    !["GENERAL", "TIENDA", "PRODUCTOS_TALLER", "SERVICIOS"].includes(payload.stock_scope)
+  ) {
+    return "stock_scope invalido";
+  }
+
   if (payload.descuento_porcentaje > 0 && !payload.id_cliente) {
     return "Debes seleccionar un cliente para aplicar descuento";
   }
@@ -98,4 +106,3 @@ export const validateVentaPayload = (payload) => {
 
   return null;
 };
-
