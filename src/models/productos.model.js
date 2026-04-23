@@ -1,9 +1,10 @@
 import { pool } from "../config/db.js";
 import {
   CATALOGO_GENERAL,
+  CATALOGO_PRODUCTOS_TALLER,
   getBodegaKeyForCatalogo,
   getBodegaKeyForScope,
-  getCatalogosForScope,
+  normalizeCatalogoKey,
 } from "../constants/inventory.js";
 import { requireBodegaLogicaByKey } from "./bodega.model.js";
 
@@ -114,16 +115,38 @@ const buildProductoSelect = (scopeWhere = "", stockScopeJoin = "") => `
     ${scopeWhere}
 `;
 
-export const getProductos = async ({ scope = "ALL" } = {}) => {
-  const catalogos = getCatalogosForScope(scope);
-  const scopedWarehouse = await getScopedWarehouse(scope);
-  const params = [];
-  let scopeWhere = "";
+const buildScopeVisibilityWhere = (scope = "ALL") => {
+  const normalizedScope = normalizeCatalogoKey(scope, "ALL");
 
-  if (catalogos) {
-    params.push(catalogos);
-    scopeWhere = `AND COALESCE(p.catalogo, '${CATALOGO_GENERAL}') = ANY($1::text[])`;
+  switch (normalizedScope) {
+    case "GENERAL":
+    case "VENTAS":
+      return `
+        AND COALESCE(p.catalogo, '${CATALOGO_GENERAL}') = '${CATALOGO_GENERAL}'
+        AND COALESCE(sg.existencia, 0) > 0
+      `;
+
+    case "TIENDA":
+      return `
+        AND COALESCE(st.existencia, 0) > 0
+      `;
+
+    case "PRODUCTOS_TALLER":
+    case "SERVICIOS":
+    case "REPARACION":
+      return `
+        AND COALESCE(p.catalogo, '${CATALOGO_GENERAL}') = '${CATALOGO_PRODUCTOS_TALLER}'
+        AND COALESCE(st.existencia, 0) > 0
+      `;
+
+    default:
+      return "";
   }
+};
+
+export const getProductos = async ({ scope = "ALL" } = {}) => {
+  const scopedWarehouse = await getScopedWarehouse(scope);
+  const scopeWhere = buildScopeVisibilityWhere(scope);
 
   const stockScopeJoin = scopedWarehouse
     ? `
@@ -137,8 +160,7 @@ export const getProductos = async ({ scope = "ALL" } = {}) => {
     `
       ${buildProductoSelect(scopeWhere, stockScopeJoin)}
       ORDER BY p.nombre ASC
-    `,
-    params
+    `
   );
 
   return result.rows.map((row) =>
@@ -148,6 +170,7 @@ export const getProductos = async ({ scope = "ALL" } = {}) => {
 
 export const getProductoById = async (id_producto, { scope = "ALL" } = {}) => {
   const scopedWarehouse = await getScopedWarehouse(scope);
+  const scopeWhere = buildScopeVisibilityWhere(scope);
   const stockScopeJoin = scopedWarehouse
     ? `
       LEFT JOIN "Stock_producto" ss
@@ -158,7 +181,7 @@ export const getProductoById = async (id_producto, { scope = "ALL" } = {}) => {
 
   const result = await pool.query(
     `
-      ${buildProductoSelect(`AND p.id_producto = $1`, stockScopeJoin)}
+      ${buildProductoSelect(`AND p.id_producto = $1 ${scopeWhere}`, stockScopeJoin)}
       LIMIT 1
     `,
     [id_producto]

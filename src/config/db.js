@@ -623,73 +623,27 @@ export async function ensureSchema() {
         AND sp.id_bodega = v_general
         AND COALESCE(p.catalogo, 'GENERAL') IN ('TIENDA', 'PRODUCTOS_TALLER');
 
-      -- Si por instalaciones previas quedo algun producto GENERAL en TIENDA_TALLER,
-      -- devolverlo a GENERAL.
-      INSERT INTO "Stock_producto" (
-        existencia,
-        stock_minimo,
-        ubicacion,
-        id_producto,
-        id_bodega,
-        created_at,
-        updated_at,
-        created_by,
-        updated_by
-      )
-      SELECT
-        sp.existencia,
-        sp.stock_minimo,
-        sp.ubicacion,
-        sp.id_producto,
-        v_general,
-        COALESCE(sp.created_at, now()),
-        now(),
-        sp.created_by,
-        sp.updated_by
-      FROM "Stock_producto" sp
-      INNER JOIN "Producto" p
-        ON p.id_producto = sp.id_producto
-      WHERE sp.id_bodega = v_tienda_taller
-        AND COALESCE(p.catalogo, 'GENERAL') = 'GENERAL'
-        AND NOT EXISTS (
-          SELECT 1
-          FROM "Stock_producto" sp2
-          WHERE sp2.id_producto = sp.id_producto
-            AND sp2.id_bodega = v_general
-        );
+      -- No devolver stock de TIENDA_TALLER a GENERAL segun catalogo.
+      -- Si el usuario traslado producto GENERAL hacia TIENDA_TALLER, ese
+      -- movimiento debe respetarse y no deshacerse automaticamente.
 
-      UPDATE "Stock_producto" sp_dest
-         SET existencia = COALESCE(sp_dest.existencia, 0) + COALESCE(sp_src.existencia, 0),
-             updated_at = now()
-        FROM "Stock_producto" sp_src
-        INNER JOIN "Producto" p
-          ON p.id_producto = sp_src.id_producto
-       WHERE sp_dest.id_producto = sp_src.id_producto
-         AND sp_dest.id_bodega = v_general
-         AND sp_src.id_bodega = v_tienda_taller
-         AND COALESCE(p.catalogo, 'GENERAL') = 'GENERAL'
-         AND sp_dest.id_stock <> sp_src.id_stock;
-
-      DELETE FROM "Stock_producto" sp
-      USING "Producto" p
-      WHERE p.id_producto = sp.id_producto
-        AND sp.id_bodega = v_tienda_taller
-        AND COALESCE(p.catalogo, 'GENERAL') = 'GENERAL';
-
-      -- Reapuntar kardex historico segun el catalogo actual del producto.
+      -- Reapuntar solo bodegas legacy del kardex historico.
+      -- Nunca reescribir movimientos que ya estan en GENERAL o TIENDA_TALLER.
       UPDATE "Movimiento_stock" ms
          SET id_bodega = CASE
-           WHEN COALESCE(p.catalogo, 'GENERAL') = 'GENERAL' THEN v_general
-           ELSE v_tienda_taller
+           WHEN UPPER(BTRIM(b."Nombre")) = 'PRINCIPAL' THEN v_general
+           WHEN UPPER(BTRIM(b."Nombre")) IN ('TIENDA', 'PRODUCTOS_TALLER', 'SERVICIOS', 'TALLER')
+             THEN v_tienda_taller
+           ELSE ms.id_bodega
          END
-        FROM "Producto" p,
-             "Bodega" b
-       WHERE p.id_producto = ms.id_producto
-         AND b.id_bodega = ms.id_bodega
-         AND UPPER(BTRIM(b."Nombre")) IN ('GENERAL', 'PRINCIPAL', 'TIENDA', 'PRODUCTOS_TALLER', 'SERVICIOS', 'TALLER')
+        FROM "Bodega" b
+       WHERE b.id_bodega = ms.id_bodega
+         AND UPPER(BTRIM(b."Nombre")) IN ('PRINCIPAL', 'TIENDA', 'PRODUCTOS_TALLER', 'SERVICIOS', 'TALLER')
          AND ms.id_bodega <> CASE
-           WHEN COALESCE(p.catalogo, 'GENERAL') = 'GENERAL' THEN v_general
-           ELSE v_tienda_taller
+           WHEN UPPER(BTRIM(b."Nombre")) = 'PRINCIPAL' THEN v_general
+           WHEN UPPER(BTRIM(b."Nombre")) IN ('TIENDA', 'PRODUCTOS_TALLER', 'SERVICIOS', 'TALLER')
+             THEN v_tienda_taller
+           ELSE ms.id_bodega
          END;
     END $$;
   `);

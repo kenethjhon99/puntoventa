@@ -2,9 +2,6 @@ import { pool } from "../config/db.js";
 import {
   BODEGA_GENERAL,
   BODEGA_TIENDA_TALLER,
-  CATALOGO_GENERAL,
-  CATALOGO_TIENDA,
-  CATALOGO_PRODUCTOS_TALLER,
   getBodegaVisibleName,
   normalizeBodegaKey,
 } from "../constants/inventory.js";
@@ -29,14 +26,6 @@ const ALLOWED_SORT = new Set([
   "total_unidades",
   "total_valorizado",
 ]);
-
-const getAllowedCatalogosByBodegaKey = (bodegaKey) => {
-  const normalized = normalizeBodegaKey(bodegaKey);
-  if (normalized === BODEGA_GENERAL) {
-    return [CATALOGO_GENERAL];
-  }
-  return [CATALOGO_TIENDA, CATALOGO_PRODUCTOS_TALLER];
-};
 
 const assertTrasladoPair = (origenKey, destinoKey) => {
   const origin = normalizeBodegaKey(origenKey);
@@ -83,17 +72,16 @@ export const listarProductosBodegaOrigen = async (id_bodega, { q = "" } = {}) =>
     throw new Error("La bodega seleccionada no es valida para traslados");
   }
 
-  const catalogos = getAllowedCatalogosByBodegaKey(bodegaKey);
-  const values = [Number(id_bodega), catalogos];
+  const values = [Number(id_bodega)];
   let whereBusqueda = "";
 
   if (String(q || "").trim()) {
     values.push(`%${String(q).trim()}%`);
     whereBusqueda = `
       AND (
-        p.nombre ILIKE $3
-        OR COALESCE(p.codigo_barras, '') ILIKE $3
-        OR COALESCE(p.descripcion, '') ILIKE $3
+        p.nombre ILIKE $2
+        OR COALESCE(p.codigo_barras, '') ILIKE $2
+        OR COALESCE(p.descripcion, '') ILIKE $2
       )
     `;
   }
@@ -118,7 +106,6 @@ export const listarProductosBodegaOrigen = async (id_bodega, { q = "" } = {}) =>
        AND s.id_bodega = $1
       WHERE COALESCE(p.activo, true) = true
         AND COALESCE(s.existencia, 0) > 0
-        AND COALESCE(p.catalogo, 'GENERAL') = ANY($2::text[])
         ${whereBusqueda}
       ORDER BY p.nombre ASC
     `,
@@ -335,7 +322,6 @@ export const crearTraslado = async ({
     const destinationKey = normalizeBodegaKey(destino.nombre);
     assertTrasladoPair(originKey, destinationKey);
 
-    const catalogosPermitidos = getAllowedCatalogosByBodegaKey(originKey);
     const detalleNormalizado = detalle.map((item) => ({
       id_producto: Number(item.id_producto),
       cantidad: Number(item.cantidad),
@@ -402,12 +388,6 @@ export const crearTraslado = async ({
       const producto = productoResult.rows[0];
       if (!producto) {
         throw new Error(`El producto ${item.id_producto} no existe en la bodega origen`);
-      }
-
-      if (!catalogosPermitidos.includes(producto.catalogo)) {
-        throw new Error(
-          `El producto "${producto.nombre}" no corresponde al catalogo de la bodega origen`
-        );
       }
 
       const existenciaAntes = Number(producto.existencia || 0);
