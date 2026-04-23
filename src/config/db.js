@@ -239,6 +239,217 @@ const ensureUpdatedAtTriggerForTable = async (tableName) => {
       END IF;
     END $$;
   `);
+
+  // Reconciliar traslados historicos realizados antes de la correccion
+  // de visibilidad por bodega.
+  //
+  // Caso a reparar:
+  // - un producto catalogo GENERAL fue trasladado a TIENDA_TALLER
+  // - una migracion vieja lo devolvio a GENERAL por catalogo
+  // - hoy el historial existe, pero el stock no refleja ese saldo
+  //
+  // Regla:
+  // - calcular el saldo neto trasladado hacia TIENDA_TALLER
+  // - si el stock actual en TIENDA_TALLER es menor a ese saldo,
+  //   mover solo la diferencia desde GENERAL
+  // - nunca duplicar stock
+  // - nunca mover mas de lo disponible en GENERAL
+  await pool.query(`
+    WITH logical_bodegas AS (
+      SELECT
+        (
+          SELECT id_bodega
+          FROM "Bodega"
+          WHERE UPPER(BTRIM("Nombre")) = 'GENERAL'
+          ORDER BY id_bodega ASC
+          LIMIT 1
+        ) AS id_bodega_general,
+        (
+          SELECT id_bodega
+          FROM "Bodega"
+          WHERE UPPER(BTRIM("Nombre")) = 'TIENDA_TALLER'
+          ORDER BY id_bodega ASC
+          LIMIT 1
+        ) AS id_bodega_tienda_taller
+    ),
+    traslado_balance AS (
+      SELECT
+        td.id_producto,
+        SUM(
+          CASE
+            WHEN UPPER(BTRIM(bo."Nombre")) IN ('GENERAL', 'PRINCIPAL')
+             AND UPPER(BTRIM(bd."Nombre")) IN ('TIENDA_TALLER', 'TIENDA', 'PRODUCTOS_TALLER', 'SERVICIOS', 'TALLER')
+              THEN td.cantidad
+            WHEN UPPER(BTRIM(bo."Nombre")) IN ('TIENDA_TALLER', 'TIENDA', 'PRODUCTOS_TALLER', 'SERVICIOS', 'TALLER')
+             AND UPPER(BTRIM(bd."Nombre")) IN ('GENERAL', 'PRINCIPAL')
+              THEN -td.cantidad
+            ELSE 0
+          END
+        )::integer AS saldo_tienda_taller
+      FROM traslado t
+      INNER JOIN traslado_detalle td
+        ON td.id_traslado = t.id_traslado
+      INNER JOIN "Bodega" bo
+        ON bo.id_bodega = t.id_bodega_origen
+      INNER JOIN "Bodega" bd
+        ON bd.id_bodega = t.id_bodega_destino
+      INNER JOIN "Producto" p
+        ON p.id_producto = td.id_producto
+      WHERE t.estado = 'RECIBIDO'
+        AND COALESCE(p.catalogo, 'GENERAL') = 'GENERAL'
+      GROUP BY td.id_producto
+      HAVING SUM(
+        CASE
+          WHEN UPPER(BTRIM(bo."Nombre")) IN ('GENERAL', 'PRINCIPAL')
+           AND UPPER(BTRIM(bd."Nombre")) IN ('TIENDA_TALLER', 'TIENDA', 'PRODUCTOS_TALLER', 'SERVICIOS', 'TALLER')
+            THEN td.cantidad
+          WHEN UPPER(BTRIM(bo."Nombre")) IN ('TIENDA_TALLER', 'TIENDA', 'PRODUCTOS_TALLER', 'SERVICIOS', 'TALLER')
+           AND UPPER(BTRIM(bd."Nombre")) IN ('GENERAL', 'PRINCIPAL')
+            THEN -td.cantidad
+          ELSE 0
+        END
+      ) > 0
+    ),
+    missing_rows AS (
+      SELECT
+        tb.id_producto,
+        lb.id_bodega_tienda_taller,
+        COALESCE(sg.stock_minimo, 0) AS stock_minimo,
+        sg.ubicacion,
+        sg.created_by,
+        sg.updated_by
+      FROM traslado_balance tb
+      CROSS JOIN logical_bodegas lb
+      LEFT JOIN "Stock_producto" st
+        ON st.id_producto = tb.id_producto
+       AND st.id_bodega = lb.id_bodega_tienda_taller
+      LEFT JOIN "Stock_producto" sg
+        ON sg.id_producto = tb.id_producto
+       AND sg.id_bodega = lb.id_bodega_general
+      WHERE lb.id_bodega_tienda_taller IS NOT NULL
+        AND st.id_stock IS NULL
+    )
+    INSERT INTO "Stock_producto" (
+      existencia,
+      stock_minimo,
+      ubicacion,
+      id_producto,
+      id_bodega,
+      created_at,
+      updated_at,
+      created_by,
+      updated_by
+    )
+    SELECT
+      0,
+      mr.stock_minimo,
+      mr.ubicacion,
+      mr.id_producto,
+      mr.id_bodega_tienda_taller,
+      now(),
+      now(),
+      mr.created_by,
+      mr.updated_by
+    FROM missing_rows mr
+  `);
+
+  await pool.query(`
+    WITH logical_bodegas AS (
+      SELECT
+        (
+          SELECT id_bodega
+          FROM "Bodega"
+          WHERE UPPER(BTRIM("Nombre")) = 'GENERAL'
+          ORDER BY id_bodega ASC
+          LIMIT 1
+        ) AS id_bodega_general,
+        (
+          SELECT id_bodega
+          FROM "Bodega"
+          WHERE UPPER(BTRIM("Nombre")) = 'TIENDA_TALLER'
+          ORDER BY id_bodega ASC
+          LIMIT 1
+        ) AS id_bodega_tienda_taller
+    ),
+    traslado_balance AS (
+      SELECT
+        td.id_producto,
+        SUM(
+          CASE
+            WHEN UPPER(BTRIM(bo."Nombre")) IN ('GENERAL', 'PRINCIPAL')
+             AND UPPER(BTRIM(bd."Nombre")) IN ('TIENDA_TALLER', 'TIENDA', 'PRODUCTOS_TALLER', 'SERVICIOS', 'TALLER')
+              THEN td.cantidad
+            WHEN UPPER(BTRIM(bo."Nombre")) IN ('TIENDA_TALLER', 'TIENDA', 'PRODUCTOS_TALLER', 'SERVICIOS', 'TALLER')
+             AND UPPER(BTRIM(bd."Nombre")) IN ('GENERAL', 'PRINCIPAL')
+              THEN -td.cantidad
+            ELSE 0
+          END
+        )::integer AS saldo_tienda_taller
+      FROM traslado t
+      INNER JOIN traslado_detalle td
+        ON td.id_traslado = t.id_traslado
+      INNER JOIN "Bodega" bo
+        ON bo.id_bodega = t.id_bodega_origen
+      INNER JOIN "Bodega" bd
+        ON bd.id_bodega = t.id_bodega_destino
+      INNER JOIN "Producto" p
+        ON p.id_producto = td.id_producto
+      WHERE t.estado = 'RECIBIDO'
+        AND COALESCE(p.catalogo, 'GENERAL') = 'GENERAL'
+      GROUP BY td.id_producto
+      HAVING SUM(
+        CASE
+          WHEN UPPER(BTRIM(bo."Nombre")) IN ('GENERAL', 'PRINCIPAL')
+           AND UPPER(BTRIM(bd."Nombre")) IN ('TIENDA_TALLER', 'TIENDA', 'PRODUCTOS_TALLER', 'SERVICIOS', 'TALLER')
+            THEN td.cantidad
+          WHEN UPPER(BTRIM(bo."Nombre")) IN ('TIENDA_TALLER', 'TIENDA', 'PRODUCTOS_TALLER', 'SERVICIOS', 'TALLER')
+           AND UPPER(BTRIM(bd."Nombre")) IN ('GENERAL', 'PRINCIPAL')
+            THEN -td.cantidad
+          ELSE 0
+        END
+      ) > 0
+    ),
+    objetivo AS (
+      SELECT
+        tb.id_producto,
+        lb.id_bodega_general,
+        lb.id_bodega_tienda_taller,
+        COALESCE(sg.existencia, 0)::integer AS stock_general_actual,
+        COALESCE(st.existencia, 0)::integer AS stock_tienda_actual,
+        GREATEST(tb.saldo_tienda_taller - COALESCE(st.existencia, 0), 0)::integer AS faltante_tienda_taller
+      FROM traslado_balance tb
+      CROSS JOIN logical_bodegas lb
+      LEFT JOIN "Stock_producto" sg
+        ON sg.id_producto = tb.id_producto
+       AND sg.id_bodega = lb.id_bodega_general
+      LEFT JOIN "Stock_producto" st
+        ON st.id_producto = tb.id_producto
+       AND st.id_bodega = lb.id_bodega_tienda_taller
+      WHERE lb.id_bodega_general IS NOT NULL
+        AND lb.id_bodega_tienda_taller IS NOT NULL
+    ),
+    aplicables AS (
+      SELECT *
+      FROM objetivo
+      WHERE faltante_tienda_taller > 0
+        AND stock_general_actual >= faltante_tienda_taller
+    ),
+    move_to_tienda AS (
+      UPDATE "Stock_producto" st
+         SET existencia = COALESCE(st.existencia, 0) + a.faltante_tienda_taller,
+             updated_at = now()
+        FROM aplicables a
+       WHERE st.id_producto = a.id_producto
+         AND st.id_bodega = a.id_bodega_tienda_taller
+      RETURNING a.id_producto, a.faltante_tienda_taller, a.id_bodega_general
+    )
+    UPDATE "Stock_producto" sg
+       SET existencia = COALESCE(sg.existencia, 0) - mt.faltante_tienda_taller,
+           updated_at = now()
+      FROM move_to_tienda mt
+     WHERE sg.id_producto = mt.id_producto
+       AND sg.id_bodega = mt.id_bodega_general
+  `);
 };
 
 export async function ensureSchema() {
