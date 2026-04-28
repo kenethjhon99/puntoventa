@@ -36,7 +36,7 @@ const getLogicalStockRowsByProducto = async (id_producto, executor = null) => {
         UPPER(TRIM(b."Nombre")) AS nombre_bodega
       FROM "Stock_producto" s
       JOIN "Bodega" b
-        ON b."Id_bodega" = s.id_bodega
+        ON b.id_bodega = s.id_bodega
       WHERE s.id_producto = $1
         AND UPPER(TRIM(b."Nombre")) IN ($2, $3)
       ORDER BY
@@ -126,7 +126,7 @@ export const getStock = async ({
           COALESCE(SUM(sp.existencia), 0) AS stock_total
         FROM "Stock_producto" sp
         JOIN "Bodega" b
-          ON b."Id_bodega" = sp.id_bodega
+          ON b.id_bodega = sp.id_bodega
         WHERE UPPER(TRIM(b."Nombre")) IN ($2, $3)
         GROUP BY sp.id_producto
       )
@@ -159,7 +159,7 @@ export const getStock = async ({
       JOIN "Stock_producto" s
         ON s."id_producto" = p."id_producto"
       JOIN "Bodega" b
-        ON b."Id_bodega" = s.id_bodega
+        ON b.id_bodega = s.id_bodega
       LEFT JOIN stock_summary ss
         ON ss.id_producto = p.id_producto
       WHERE ${where.join(" AND ")}
@@ -212,7 +212,7 @@ export const getStock = async ({
           COALESCE(MAX(sp.stock_minimo), 0) AS stock_minimo_referencia
         FROM "Stock_producto" sp
         JOIN "Bodega" b
-          ON b."Id_bodega" = sp.id_bodega
+          ON b.id_bodega = sp.id_bodega
         WHERE UPPER(TRIM(b."Nombre")) IN ($1, $2)
         GROUP BY sp.id_producto
       )
@@ -252,7 +252,7 @@ export const getStock = async ({
           END AS bodega_nombre_visible
         FROM "Stock_producto" sp
         JOIN "Bodega" b
-          ON b."Id_bodega" = sp.id_bodega
+          ON b.id_bodega = sp.id_bodega
         WHERE sp.id_producto = p.id_producto
           AND UPPER(TRIM(b."Nombre")) IN ($1, $2)
         ORDER BY
@@ -490,7 +490,7 @@ export const getMovimientosStock = async ({
     LEFT JOIN "Producto" p
       ON p.id_producto = ms.id_producto
     LEFT JOIN "Bodega" b
-      ON b."Id_bodega" = ms.id_bodega
+      ON b.id_bodega = ms.id_bodega
     LEFT JOIN "Usuario" u
       ON u.id_usuario = ms.id_usuario
     WHERE ${where.join(" AND ")}

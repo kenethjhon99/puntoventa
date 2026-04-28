@@ -10,6 +10,8 @@ export const crearCompra = async (req, res) => {
       id_bodega,
       fecha_compra,
       observaciones,
+      viajero_nombre,
+      viajero_apellido,
       dias_credito,
       termino_pago,
       moneda,
@@ -18,6 +20,13 @@ export const crearCompra = async (req, res) => {
 
     if (!id_proveedor) return res.status(400).json({ error: "id_proveedor es requerido" });
     if (!Array.isArray(items) || items.length === 0) return res.status(400).json({ error: "items es requerido" });
+
+    const viajeroNombreNormalizado = String(viajero_nombre || "").trim();
+    const viajeroApellidoNormalizado = String(viajero_apellido || "").trim();
+
+    if ((viajeroNombreNormalizado && !viajeroApellidoNormalizado) || (!viajeroNombreNormalizado && viajeroApellidoNormalizado)) {
+      return res.status(400).json({ error: "Debes ingresar nombre y apellido del viajero completos" });
+    }
 
     const diasCreditoNum = Number(dias_credito ?? 0);
     if (!Number.isFinite(diasCreditoNum) || diasCreditoNum < 0 || diasCreditoNum > 365) {
@@ -29,6 +38,8 @@ export const crearCompra = async (req, res) => {
       no_documento,
       fecha_compra,
       observaciones,
+      viajero_nombre: viajeroNombreNormalizado || null,
+      viajero_apellido: viajeroApellidoNormalizado || null,
       id_usuario: req.user.id_usuario,
       id_proveedor: Number(id_proveedor),
       id_sucursal: Number(id_sucursal || 1),

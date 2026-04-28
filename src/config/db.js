@@ -1163,6 +1163,16 @@ export async function ensureSchema() {
   `);
 
   await pool.query(`
+    ALTER TABLE "Compra"
+    ADD COLUMN IF NOT EXISTS viajero_nombre character varying(120)
+  `);
+
+  await pool.query(`
+    ALTER TABLE "Compra"
+    ADD COLUMN IF NOT EXISTS viajero_apellido character varying(120)
+  `);
+
+  await pool.query(`
     ALTER TABLE "Detalle_compra"
     ADD COLUMN IF NOT EXISTS cantidad_anulada integer NOT NULL DEFAULT 0
   `);

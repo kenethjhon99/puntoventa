@@ -16,6 +16,8 @@ export const crearCompra = async ({
   no_documento,
   fecha_compra,
   observaciones,
+  viajero_nombre,
+  viajero_apellido,
   id_usuario,
   id_proveedor,
   id_sucursal = 1,
@@ -53,7 +55,9 @@ export const crearCompra = async ({
         dias_credito,
         termino_pago,
         moneda,
-        fecha_limite_pago
+        fecha_limite_pago,
+        viajero_nombre,
+        viajero_apellido
       )
       VALUES (
         COALESCE($1::timestamptz, now()),
@@ -71,7 +75,9 @@ export const crearCompra = async ({
         $9,
         $10,
         $11,
-        (COALESCE($1::timestamptz, now())::date + ($9 || ' days')::interval)::date
+        (COALESCE($1::timestamptz, now())::date + ($9 || ' days')::interval)::date,
+        $12,
+        $13
       )
       RETURNING *`,
       [
@@ -85,7 +91,9 @@ export const crearCompra = async ({
         id_usuario,
         diasCreditoNum,
         terminoPagoFinal,
-        moneda || "GTQ"
+        moneda || "GTQ",
+        viajero_nombre ? String(viajero_nombre).trim().slice(0, 120) : null,
+        viajero_apellido ? String(viajero_apellido).trim().slice(0, 120) : null,
       ]
     );
 
@@ -270,7 +278,9 @@ export const listarCompras = async (filters) => {
         p.nombre AS proveedor_nombre,
         p.telefono AS proveedor_telefono,
         p.telefono AS proveedor_telefono_empresa,
-        NULL::text AS proveedor_nombre_viajero,
+        c.viajero_nombre,
+        c.viajero_apellido,
+        NULLIF(TRIM(CONCAT(COALESCE(c.viajero_nombre, ''), ' ', COALESCE(c.viajero_apellido, ''))), '') AS proveedor_nombre_viajero,
         NULL::text AS proveedor_telefono_viajero,
         u.username AS usuario_username,
         COALESCE(ds.unidades_anuladas, 0) AS unidades_anuladas,
@@ -311,7 +321,9 @@ export const getCompraCompleta = async (id_compra) => {
         p.nombre AS proveedor_nombre,
         p.telefono AS proveedor_telefono,
         p.telefono AS proveedor_telefono_empresa,
-        NULL::text AS proveedor_nombre_viajero,
+        c.viajero_nombre,
+        c.viajero_apellido,
+        NULLIF(TRIM(CONCAT(COALESCE(c.viajero_nombre, ''), ' ', COALESCE(c.viajero_apellido, ''))), '') AS proveedor_nombre_viajero,
         NULL::text AS proveedor_telefono_viajero,
         p.correo AS proveedor_correo,
         p.direccion AS proveedor_direccion,
