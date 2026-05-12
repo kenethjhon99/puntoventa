@@ -1,6 +1,6 @@
 import dotenv from "dotenv";
 import pg from "pg";
-import { hashPassword } from "../utils/password.js";
+import { hashPassword, validatePasswordPolicy } from "../utils/password.js";
 
 dotenv.config();
 
@@ -81,6 +81,15 @@ const ensureBootstrapUser = async () => {
   const password = String(process.env.BOOTSTRAP_PASSWORD || "");
 
   if (!username || !password) return;
+
+  try {
+    validatePasswordPolicy(password);
+  } catch (error) {
+    console.warn(
+      `[bootstrap-user] Se omitio BOOTSTRAP_USERNAME="${username}" porque BOOTSTRAP_PASSWORD no cumple la politica: ${error.message}`
+    );
+    return;
+  }
 
   const nombre = String(process.env.BOOTSTRAP_NOMBRE || "Super").trim() || "Super";
   const apellido = String(process.env.BOOTSTRAP_APELLIDO || "Admin").trim() || "Admin";
@@ -1128,6 +1137,31 @@ export async function ensureSchema() {
   await pool.query(`
     ALTER TABLE "Venta"
     ADD COLUMN IF NOT EXISTS descuento_total numeric(12,2) NOT NULL DEFAULT 0
+  `);
+
+  await pool.query(`
+    ALTER TABLE "Venta"
+    ADD COLUMN IF NOT EXISTS id_empleado_credito integer
+  `);
+
+  await pool.query(`
+    DO $$
+    BEGIN
+      IF NOT EXISTS (
+        SELECT 1
+        FROM pg_constraint
+        WHERE conname = 'fk_venta_empleado_credito'
+      ) THEN
+        ALTER TABLE "Venta"
+        ADD CONSTRAINT fk_venta_empleado_credito
+        FOREIGN KEY (id_empleado_credito) REFERENCES "Empleado"(id_empleado);
+      END IF;
+    END $$;
+  `);
+
+  await pool.query(`
+    CREATE INDEX IF NOT EXISTS "idx_venta_empleado_credito"
+    ON "Venta" (id_empleado_credito)
   `);
 
   await pool.query(`

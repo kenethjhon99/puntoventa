@@ -51,6 +51,24 @@ const warn = (msg) => {
   console.warn("[validateEnv] WARN:", msg);
 };
 
+// Politica de password para BOOTSTRAP_PASSWORD. Tiene que coincidir con
+// la que aplica `validatePasswordPolicy` en utils/password.js, porque
+// `ensureBootstrapUser` llama `hashPassword` que valida. Si valida ahi
+// el server explota con un stack feo a mitad de bootstrap. Validamos
+// aqui ANTES para dar un mensaje accionable.
+const checkBootstrapPasswordPolicy = (password) => {
+  if (typeof password !== "string" || password.length < 8) {
+    return "BOOTSTRAP_PASSWORD debe tener al menos 8 caracteres.";
+  }
+  if (password !== password.trim()) {
+    return "BOOTSTRAP_PASSWORD no puede empezar ni terminar con espacios.";
+  }
+  if (!/[A-Za-z]/.test(password) || !/\d/.test(password)) {
+    return "BOOTSTRAP_PASSWORD debe incluir al menos una letra y un numero.";
+  }
+  return null;
+};
+
 export const validateEnv = () => {
   const isProd = process.env.NODE_ENV === "production";
 
@@ -80,6 +98,27 @@ export const validateEnv = () => {
     const msg = `PGPASSWORD es un valor debil conocido ("${dbPassword}"). Cambialo en Postgres con: ALTER USER postgres WITH PASSWORD '...'`;
     if (isProd) fail(msg);
     else warn(msg);
+  }
+
+  // ---- BOOTSTRAP_PASSWORD (super_admin) ----
+  // Si el usuario configuro bootstrap user/password, el password debe
+  // cumplir la policy. Sin esta validacion temprana, el server aborta
+  // a mitad de bootstrap con un stack feo.
+  const bootstrapUser = String(process.env.BOOTSTRAP_USERNAME || "").trim();
+  const bootstrapPass = String(process.env.BOOTSTRAP_PASSWORD || "");
+  if (bootstrapUser && bootstrapPass) {
+    const policyError = checkBootstrapPasswordPolicy(bootstrapPass);
+    if (policyError) {
+      fail(
+        `${policyError}\n` +
+          `   El usuario super_admin "${bootstrapUser}" se crea al boot via\n` +
+          `   BOOTSTRAP_PASSWORD; debe cumplir la policy normal.\n` +
+          `   Opciones:\n` +
+          `     1) Cambia BOOTSTRAP_PASSWORD por uno fuerte (min 8 chars con letra y numero).\n` +
+          `     2) Si el super_admin ya existe en la DB, puedes borrar BOOTSTRAP_USERNAME\n` +
+          `        y BOOTSTRAP_PASSWORD del env: el server no necesita recrearlo en cada boot.`
+      );
+    }
   }
 
   // ---- Otros bits informativos ----
