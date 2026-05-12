@@ -109,10 +109,9 @@ export const validateEnv = () => {
   if (bootstrapUser && bootstrapPass) {
     const policyError = checkBootstrapPasswordPolicy(bootstrapPass);
     if (policyError) {
-      fail(
+      warn(
         `${policyError}\n` +
-          `   El usuario super_admin "${bootstrapUser}" se crea al boot via\n` +
-          `   BOOTSTRAP_PASSWORD; debe cumplir la policy normal.\n` +
+          `   Se omitira el bootstrap del usuario "${bootstrapUser}" para no bloquear el arranque.\n` +
           `   Opciones:\n` +
           `     1) Cambia BOOTSTRAP_PASSWORD por uno fuerte (min 8 chars con letra y numero).\n` +
           `     2) Si el super_admin ya existe en la DB, puedes borrar BOOTSTRAP_USERNAME\n` +
