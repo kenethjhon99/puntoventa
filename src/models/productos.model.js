@@ -156,10 +156,15 @@ export const getProductos = async ({ scope = "ALL" } = {}) => {
     `
     : `LEFT JOIN "Stock_producto" ss ON 1 = 0`;
 
+  // Safety cap: limite alto pero finito para prevenir DoS si la tabla
+  // crece sin control. El frontend recibe un array como siempre. Si en
+  // algun momento el catalogo se acerca a este techo, se debera
+  // implementar paginacion real (?page, ?limit) y migrar el frontend.
   const result = await pool.query(
     `
       ${buildProductoSelect(scopeWhere, stockScopeJoin)}
       ORDER BY p.nombre ASC
+      LIMIT 10000
     `
   );
 

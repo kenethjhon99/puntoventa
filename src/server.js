@@ -1,5 +1,12 @@
-import app from "./app.js";
-import { testDB } from "./config/db.js";
+import "dotenv/config";
+import { validateEnv } from "./config/validateEnv.js";
+
+// IMPORTANTE: validateEnv() corre ANTES de importar app/db. Si la
+// configuracion esta rota o insegura, abortamos sin abrir conexiones.
+validateEnv();
+
+const { default: app } = await import("./app.js");
+const { testDB } = await import("./config/db.js");
 
 await testDB();
 

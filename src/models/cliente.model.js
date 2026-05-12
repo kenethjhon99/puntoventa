@@ -7,6 +7,9 @@ const buildClienteCode = (numero) => {
 };
 
 export const getClientes = async ({ incluirInactivos = false } = {}) => {
+  // Safety cap: techo defensivo contra DoS si la tabla crece sin
+  // limite. Para paginar (si llegamos a tener mas de 10000 clientes
+  // activos), migrar a ?page+?limit.
   const result = await pool.query(
     `
       SELECT
@@ -28,6 +31,7 @@ export const getClientes = async ({ incluirInactivos = false } = {}) => {
       FROM "Clientes"
       WHERE $1::boolean = true OR estado = true
       ORDER BY estado DESC, nombre ASC NULLS LAST, codigo ASC
+      LIMIT 10000
     `,
     [incluirInactivos]
   );

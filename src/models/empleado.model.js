@@ -20,12 +20,15 @@ const EMPLEADO_COLUMNS = `
 `;
 
 export const getEmpleados = async ({ incluirInactivos = false } = {}) => {
+  // Safety cap: techo defensivo contra DoS. Si la nomina llega a
+  // 10000 empleados activos (improbable), migrar a paginacion.
   const result = await pool.query(
     `
       SELECT ${EMPLEADO_COLUMNS}
       FROM "Empleado"
       WHERE $1::boolean = true OR activo = true
       ORDER BY activo DESC, nombre ASC, id_empleado ASC
+      LIMIT 10000
     `,
     [incluirInactivos]
   );

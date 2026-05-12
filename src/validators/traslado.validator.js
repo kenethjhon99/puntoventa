@@ -1,3 +1,5 @@
+import { clampPage, clampLimit } from "../utils/pagination.js";
+
 const normalizeOptionalInteger = (value) => {
   if (value == null || value === "") return null;
   const parsed = Number(value);
@@ -17,8 +19,11 @@ export const normalizeListQuery = (query = {}) => ({
   id_bodega_destino: normalizeOptionalInteger(query.id_bodega_destino),
   id_usuario: normalizeOptionalInteger(query.id_usuario),
   id_producto: normalizeOptionalInteger(query.id_producto),
-  page: Number(query.page) || 1,
-  limit: Number(query.limit) || 20,
+  // page/limit clampeados a entero positivo. Sin esto un cliente
+  // malicioso podia mandar `?limit=1.5` o `?limit=Infinity` y romper
+  // el SQL del listado.
+  page: clampPage(query.page),
+  limit: clampLimit(query.limit, { defaultLimit: 20, max: 100 }),
   sortBy: query.sortBy || "fecha",
   sortDir: query.sortDir || "desc",
 });

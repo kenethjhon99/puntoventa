@@ -1,4 +1,5 @@
 import { pool } from "../config/db.js";
+import { clampPage, clampLimit } from "../utils/pagination.js";
 
 const AUDIT_ENTITIES = {
   PRODUCTOS: {
@@ -143,10 +144,18 @@ export const auditoriaCatalogo = async ({
   page = 1,
   limit = 20,
 }) => {
-  const entidadKey = String(entidad || "PRODUCTOS").trim().toUpperCase();
-  const config = AUDIT_ENTITIES[entidadKey] || AUDIT_ENTITIES.PRODUCTOS;
-  const safePage = Math.max(1, Number(page) || 1);
-  const safeLimit = Math.min(1000, Math.max(1, Number(limit) || 20));
+  // entidadKey va a `'${entidadKey}' AS entidad` mas abajo en el SELECT.
+  // AUDIT_ENTITIES es el whitelist: si la clave del cliente no existe en
+  // ese diccionario, REEMPLAZAMOS la variable por la default. Sin esto,
+  // un valor como "X' OR '1'='1" caia al fallback de `config` pero
+  // segui inyectandose en el template string del SELECT.
+  const requestedKey = String(entidad || "PRODUCTOS").trim().toUpperCase();
+  const entidadKey = Object.prototype.hasOwnProperty.call(AUDIT_ENTITIES, requestedKey)
+    ? requestedKey
+    : "PRODUCTOS";
+  const config = AUDIT_ENTITIES[entidadKey];
+  const safePage = clampPage(page);
+  const safeLimit = clampLimit(limit, { defaultLimit: 20, max: 1000 });
   const offset = (safePage - 1) * safeLimit;
 
   const alias = config.alias;
@@ -337,10 +346,10 @@ export const corteVentasDetalladoPro = async ({
   limit = 50,
   top = 10,
 }) => {
-  const safePage = Math.max(1, Number(page) || 1);
-  const safeLimit = Math.min(200, Math.max(1, Number(limit) || 50));
+  const safePage = clampPage(page);
+  const safeLimit = clampLimit(limit, { defaultLimit: 50, max: 200 });
   const offset = (safePage - 1) * safeLimit;
-  const safeTop = Math.min(50, Math.max(1, Number(top) || 10));
+  const safeTop = clampLimit(top, { defaultLimit: 10, max: 50 });
 
   const paramsBase = [desde, hasta, Number(id_sucursal)];
   let filtroUsuario = "";

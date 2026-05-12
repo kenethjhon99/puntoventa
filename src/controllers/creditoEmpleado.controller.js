@@ -6,104 +6,71 @@ import {
   normalizeCondonarPayload,
   validateCondonarPayload,
 } from "../validators/creditoEmpleado.validator.js";
+import { asyncHandler, httpError } from "../utils/asyncHandler.js";
 
-const parsePositiveInt = (value) => {
+// Refactor a asyncHandler: errores no manejados van al handler global.
+
+const parsePositiveInt = (value, label) => {
   const n = Number(value);
-  return Number.isInteger(n) && n > 0 ? n : null;
-};
-
-export const listarCreditos = async (req, res) => {
-  try {
-    const query = normalizeListQuery(req.query);
-    const validationError = validateListQuery(query);
-    if (validationError) {
-      return res.status(400).json({ error: validationError });
-    }
-
-    const result = await CreditoEmpleado.listarCreditos(query);
-    res.json({ ok: true, ...result });
-  } catch (error) {
-    res.status(500).json({ error: error.message });
+  if (!Number.isInteger(n) || n <= 0) {
+    throw httpError(400, `${label} invalido`);
   }
+  return n;
 };
 
-export const getCredito = async (req, res) => {
-  try {
-    const id = parsePositiveInt(req.params.id);
-    if (!id) {
-      return res.status(400).json({ error: "id_credito_empleado invalido" });
-    }
+export const listarCreditos = asyncHandler(async (req, res) => {
+  const query = normalizeListQuery(req.query);
+  const validationError = validateListQuery(query);
+  if (validationError) throw httpError(400, validationError);
 
-    const credito = await CreditoEmpleado.getCreditoById(id);
-    if (!credito) {
-      return res.status(404).json({ error: "Credito no encontrado" });
-    }
+  const result = await CreditoEmpleado.listarCreditos(query);
+  res.json({ ok: true, ...result });
+});
 
-    res.json({ ok: true, credito });
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
-};
+export const getCredito = asyncHandler(async (req, res) => {
+  const id = parsePositiveInt(req.params.id, "id_credito_empleado");
 
-export const getAlertas = async (_req, res) => {
-  try {
-    const data = await CreditoEmpleado.getAlertasAdmin();
-    res.json({ ok: true, ...data });
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
-};
+  const credito = await CreditoEmpleado.getCreditoById(id);
+  if (!credito) throw httpError(404, "Credito no encontrado");
 
-export const getNominaProxima = async (_req, res) => {
-  try {
-    const data = await CreditoEmpleado.getNominaProxima();
-    res.json({ ok: true, data });
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
-};
+  res.json({ ok: true, credito });
+});
 
-export const cobrarCredito = async (req, res) => {
-  try {
-    const id = parsePositiveInt(req.params.id);
-    if (!id) {
-      return res.status(400).json({ error: "id_credito_empleado invalido" });
-    }
+export const getAlertas = asyncHandler(async (_req, res) => {
+  const data = await CreditoEmpleado.getAlertasAdmin();
+  res.json({ ok: true, ...data });
+});
 
-    const payload = normalizeCobrarPayload(req.body);
-    const credito = await CreditoEmpleado.cobrarCredito({
-      id_credito_empleado: id,
-      nota: payload.nota,
-      id_usuario: req.user?.id_usuario ?? null,
-    });
+export const getNominaProxima = asyncHandler(async (_req, res) => {
+  const data = await CreditoEmpleado.getNominaProxima();
+  res.json({ ok: true, data });
+});
 
-    res.json({ ok: true, credito });
-  } catch (error) {
-    res.status(400).json({ error: error.message });
-  }
-};
+export const cobrarCredito = asyncHandler(async (req, res) => {
+  const id = parsePositiveInt(req.params.id, "id_credito_empleado");
+  const payload = normalizeCobrarPayload(req.body);
 
-export const condonarCredito = async (req, res) => {
-  try {
-    const id = parsePositiveInt(req.params.id);
-    if (!id) {
-      return res.status(400).json({ error: "id_credito_empleado invalido" });
-    }
+  const credito = await CreditoEmpleado.cobrarCredito({
+    id_credito_empleado: id,
+    nota: payload.nota,
+    id_usuario: req.user?.id_usuario ?? null,
+  });
 
-    const payload = normalizeCondonarPayload(req.body);
-    const validationError = validateCondonarPayload(payload);
-    if (validationError) {
-      return res.status(400).json({ error: validationError });
-    }
+  res.json({ ok: true, credito });
+});
 
-    const credito = await CreditoEmpleado.condonarCredito({
-      id_credito_empleado: id,
-      motivo: payload.motivo,
-      id_usuario: req.user?.id_usuario ?? null,
-    });
+export const condonarCredito = asyncHandler(async (req, res) => {
+  const id = parsePositiveInt(req.params.id, "id_credito_empleado");
 
-    res.json({ ok: true, credito });
-  } catch (error) {
-    res.status(400).json({ error: error.message });
-  }
-};
+  const payload = normalizeCondonarPayload(req.body);
+  const validationError = validateCondonarPayload(payload);
+  if (validationError) throw httpError(400, validationError);
+
+  const credito = await CreditoEmpleado.condonarCredito({
+    id_credito_empleado: id,
+    motivo: payload.motivo,
+    id_usuario: req.user?.id_usuario ?? null,
+  });
+
+  res.json({ ok: true, credito });
+});

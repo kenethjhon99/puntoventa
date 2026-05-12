@@ -3,104 +3,89 @@ import {
   normalizeProveedorPayload,
   validateProveedorPayload,
 } from "../validators/proveedor.validator.js";
+import { asyncHandler, httpError } from "../utils/asyncHandler.js";
 
-export const listarProveedores = async (req, res) => {
-  try {
-    const proveedores = await Proveedor.getProveedores({
-      incluirInactivos: String(req.query?.incluirInactivos || "").toLowerCase() === "true",
-    });
-    res.json({ ok: true, data: proveedores });
-  } catch (error) {
-    res.status(500).json({ error: error.message });
+// Refactor a asyncHandler: el catch boilerplate desaparece. Los errores
+// no manejados se delegan al handler global de app.js, que aplica la
+// politica de sanitizacion (mensaje generico + requestId en prod).
+//
+// Errores tipados con codigo HTTP correcto se lanzan via httpError().
+// El codigo 23505 (unique violation de Postgres) se maneja localmente
+// porque queremos un mensaje especifico de negocio.
+
+const parseIdProveedor = (raw) => {
+  const id = Number(raw);
+  if (!Number.isInteger(id) || id <= 0) {
+    throw httpError(400, "id_proveedor invalido");
   }
+  return id;
 };
 
-export const crearProveedor = async (req, res) => {
+export const listarProveedores = asyncHandler(async (req, res) => {
+  const proveedores = await Proveedor.getProveedores({
+    incluirInactivos:
+      String(req.query?.incluirInactivos || "").toLowerCase() === "true",
+  });
+  res.json({ ok: true, data: proveedores });
+});
+
+export const crearProveedor = asyncHandler(async (req, res) => {
+  const payload = normalizeProveedorPayload(req.body);
+  const validationError = validateProveedorPayload(payload);
+  if (validationError) throw httpError(400, validationError);
+
+  const nitExiste = await Proveedor.existsProveedorByNit(payload.nit);
+  if (nitExiste) throw httpError(409, "Ya existe un proveedor con ese NIT");
+
   try {
-    const payload = normalizeProveedorPayload(req.body);
-    const error = validateProveedorPayload(payload);
-    if (error) {
-      return res.status(400).json({ error });
-    }
-
-    const nitExiste = await Proveedor.existsProveedorByNit(payload.nit);
-    if (nitExiste) {
-      return res.status(409).json({ error: "Ya existe un proveedor con ese NIT" });
-    }
-
     const proveedor = await Proveedor.createProveedor({
       ...payload,
       actorId: req.user?.id_usuario ?? null,
     });
-
     res.status(201).json({ ok: true, proveedor });
   } catch (error) {
     if (error.code === "23505") {
-      return res.status(409).json({ error: "Ya existe un proveedor con ese NIT" });
+      throw httpError(409, "Ya existe un proveedor con ese NIT");
     }
-
-    res.status(500).json({ error: error.message });
+    throw error;
   }
-};
+});
 
-export const actualizarProveedor = async (req, res) => {
+export const actualizarProveedor = asyncHandler(async (req, res) => {
+  const id_proveedor = parseIdProveedor(req.params.id);
+
+  const payload = normalizeProveedorPayload(req.body);
+  const validationError = validateProveedorPayload(payload);
+  if (validationError) throw httpError(400, validationError);
+
+  const nitExiste = await Proveedor.existsProveedorByNit(payload.nit, id_proveedor);
+  if (nitExiste) throw httpError(409, "Ya existe un proveedor con ese NIT");
+
   try {
-    const id_proveedor = Number(req.params.id);
-
-    if (!Number.isInteger(id_proveedor) || id_proveedor <= 0) {
-      return res.status(400).json({ error: "id_proveedor invalido" });
-    }
-
-    const payload = normalizeProveedorPayload(req.body);
-    const error = validateProveedorPayload(payload);
-    if (error) {
-      return res.status(400).json({ error });
-    }
-
-    const nitExiste = await Proveedor.existsProveedorByNit(payload.nit, id_proveedor);
-    if (nitExiste) {
-      return res.status(409).json({ error: "Ya existe un proveedor con ese NIT" });
-    }
-
     const proveedor = await Proveedor.updateProveedor(
       id_proveedor,
       payload,
       req.user?.id_usuario ?? null
     );
-
-    if (!proveedor) {
-      return res.status(404).json({ error: "Proveedor no encontrado" });
-    }
-
+    if (!proveedor) throw httpError(404, "Proveedor no encontrado");
     res.json({ ok: true, proveedor });
   } catch (error) {
     if (error.code === "23505") {
-      return res.status(409).json({ error: "Ya existe un proveedor con ese NIT" });
+      throw httpError(409, "Ya existe un proveedor con ese NIT");
     }
-
-    res.status(500).json({ error: error.message });
+    throw error;
   }
-};
+});
 
-export const eliminarProveedor = async (req, res) => {
-  try {
-    const id_proveedor = Number(req.params.id);
+export const eliminarProveedor = asyncHandler(async (req, res) => {
+  const id_proveedor = parseIdProveedor(req.params.id);
 
-    if (!Number.isInteger(id_proveedor) || id_proveedor <= 0) {
-      return res.status(400).json({ error: "id_proveedor invalido" });
-    }
-
-    const proveedor = await Proveedor.desactivarProveedor(
-      id_proveedor,
-      req.user?.id_usuario ?? null
-    );
-
-    if (!proveedor) {
-      return res.status(404).json({ error: "Proveedor no encontrado o ya inactivo" });
-    }
-
-    res.json({ ok: true, proveedor });
-  } catch (error) {
-    res.status(500).json({ error: error.message });
+  const proveedor = await Proveedor.desactivarProveedor(
+    id_proveedor,
+    req.user?.id_usuario ?? null
+  );
+  if (!proveedor) {
+    throw httpError(404, "Proveedor no encontrado o ya inactivo");
   }
-};
+  res.json({ ok: true, proveedor });
+});

@@ -2,6 +2,7 @@ import { pool } from "../config/db.js";
 import { getCajaSesionActiva } from "./caja.model.js";
 import { BODEGA_TIENDA_TALLER } from "../constants/inventory.js";
 import { requireBodegaLogicaByKey } from "./bodega.model.js";
+import { clampLimit } from "../utils/pagination.js";
 
 const MODULO_AUTOLAVADO = "AUTOLAVADO";
 const MODULO_REPARACION = "REPARACION";
@@ -528,55 +529,77 @@ export const registrarCobroAutolavado = async ({
     throw new Error("El monto recibido no cubre el total del servicio");
   }
 
-  const sesionCaja = await getCajaSesionActiva(idUsuario);
-  if (!sesionCaja) {
+  const sesionCajaPrev = await getCajaSesionActiva(idUsuario);
+  if (!sesionCajaPrev) {
     throw new Error("Debes abrir una caja antes de cobrar un servicio");
   }
 
-  const servicioResult = await pool.query(
-    `
-      SELECT
-        sc.id_servicio_catalogo,
-        sc.id_tipo_vehiculo,
-        sc.nombre,
-        sc.slug,
-        sc.precio_base,
-        stv.nombre AS tipo_vehiculo_nombre
-      FROM "Servicio_catalogo" sc
-      INNER JOIN "Servicio_tipo_vehiculo" stv
-        ON stv.id_tipo_vehiculo = sc.id_tipo_vehiculo
-      WHERE sc.id_servicio_catalogo = $1
-        AND sc.id_tipo_vehiculo = $2
-        AND sc.modulo = $3
-        AND sc.activo = true
-        AND stv.activo = true
-      LIMIT 1
-    `,
-    [idServicioCatalogo, idTipoVehiculo, MODULO_AUTOLAVADO]
-  );
+  // Transaccion + lock de la sesion activa: garantiza que la caja siga
+  // ABIERTA al momento del INSERT. Sin esto, un cierre concurrente
+  // dejaba la orden ligada a una sesion ya cerrada.
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
 
-  const servicio = servicioResult.rows[0];
-  if (!servicio) {
-    throw new Error("Servicio de autolavado no encontrado");
-  }
+    const sesionLockResult = await client.query(
+      `
+        SELECT id_caja_sesion, estado, id_usuario, id_sucursal
+        FROM "Caja_sesion"
+        WHERE id_caja_sesion = $1
+        FOR UPDATE
+      `,
+      [sesionCajaPrev.id_caja_sesion]
+    );
 
-  const precioServicioPersistido =
-    String(servicio.slug || "").trim().toLowerCase() === "otro"
-      ? Number(precioServicio)
-      : Number(servicio.precio_base || 0);
+    const sesionCaja = sesionLockResult.rows[0];
+    if (!sesionCaja || sesionCaja.estado !== "ABIERTA") {
+      throw new Error("La caja ya no esta abierta. Vuelve a abrirla para cobrar.");
+    }
 
-  if (!Number.isFinite(precioServicioPersistido) || precioServicioPersistido <= 0) {
-    throw new Error("Debes indicar un precio valido para el servicio");
-  }
+    const servicioResult = await client.query(
+      `
+        SELECT
+          sc.id_servicio_catalogo,
+          sc.id_tipo_vehiculo,
+          sc.nombre,
+          sc.slug,
+          sc.precio_base,
+          stv.nombre AS tipo_vehiculo_nombre
+        FROM "Servicio_catalogo" sc
+        INNER JOIN "Servicio_tipo_vehiculo" stv
+          ON stv.id_tipo_vehiculo = sc.id_tipo_vehiculo
+        WHERE sc.id_servicio_catalogo = $1
+          AND sc.id_tipo_vehiculo = $2
+          AND sc.modulo = $3
+          AND sc.activo = true
+          AND stv.activo = true
+        LIMIT 1
+      `,
+      [idServicioCatalogo, idTipoVehiculo, MODULO_AUTOLAVADO]
+    );
 
-  const vuelto =
-    !ventaSinCobro && metodoPagoNormalizado === "EFECTIVO"
-      ? Math.max(0, Number((montoRecibidoNormalizado - montoCobradoNormalizado).toFixed(2)))
-      : 0;
+    const servicio = servicioResult.rows[0];
+    if (!servicio) {
+      throw new Error("Servicio de autolavado no encontrado");
+    }
 
-  const result = await pool.query(
-    `
-      INSERT INTO "Autolavado_orden" (
+    const precioServicioPersistido =
+      String(servicio.slug || "").trim().toLowerCase() === "otro"
+        ? Number(precioServicio)
+        : Number(servicio.precio_base || 0);
+
+    if (!Number.isFinite(precioServicioPersistido) || precioServicioPersistido <= 0) {
+      throw new Error("Debes indicar un precio valido para el servicio");
+    }
+
+    const vuelto =
+      !ventaSinCobro && metodoPagoNormalizado === "EFECTIVO"
+        ? Math.max(0, Number((montoRecibidoNormalizado - montoCobradoNormalizado).toFixed(2)))
+        : 0;
+
+    const result = await client.query(
+      `
+        INSERT INTO "Autolavado_orden" (
         id_tipo_vehiculo,
         id_servicio_catalogo,
         id_usuario,
@@ -629,35 +652,43 @@ export const registrarCobroAutolavado = async ({
         no_cobrado_motivo,
         no_cobrado_autorizado_por,
         no_cobrado_autorizado_en,
-        fecha
-    `,
-    [
-      idTipoVehiculo,
-      idServicioCatalogo,
-      idUsuario,
-      sesionCaja.id_caja_sesion,
-      Number(idSucursal || 1),
-      nombreCliente || null,
-      placa || null,
-      color || null,
-      observaciones || null,
-      metodoPagoPersistido,
-      precioServicioPersistido,
-      montoCobradoNormalizado,
-      ventaSinCobro ? null : montoRecibidoNormalizado,
-      vuelto,
-      ventaSinCobro ? "NO_COBRADO" : "PAGADO",
-      ventaSinCobro ? noCobradoMotivo : null,
-      ventaSinCobro ? noCobradoAutorizadoPor : null,
-      ventaSinCobro,
-    ]
-  );
+          fecha
+      `,
+      [
+        idTipoVehiculo,
+        idServicioCatalogo,
+        idUsuario,
+        sesionCaja.id_caja_sesion,
+        Number(idSucursal || 1),
+        nombreCliente || null,
+        placa || null,
+        color || null,
+        observaciones || null,
+        metodoPagoPersistido,
+        precioServicioPersistido,
+        montoCobradoNormalizado,
+        ventaSinCobro ? null : montoRecibidoNormalizado,
+        vuelto,
+        ventaSinCobro ? "NO_COBRADO" : "PAGADO",
+        ventaSinCobro ? noCobradoMotivo : null,
+        ventaSinCobro ? noCobradoAutorizadoPor : null,
+        ventaSinCobro,
+      ]
+    );
 
-  return {
-    orden: result.rows[0],
-    servicio,
-    caja: sesionCaja,
-  };
+    await client.query("COMMIT");
+
+    return {
+      orden: result.rows[0],
+      servicio,
+      caja: sesionCaja,
+    };
+  } catch (e) {
+    await client.query("ROLLBACK");
+    throw e;
+  } finally {
+    client.release();
+  }
 };
 
 export const registrarCobroReparacion = async ({
@@ -1429,7 +1460,7 @@ export const agregarProductoOrdenReparacion = async ({
 };
 
 export const getOrdenesAutolavado = async ({ estadoTrabajo = "TODOS", limit = 30 } = {}) => {
-  const limitNormalizado = Math.min(100, Math.max(1, Number(limit) || 30));
+  const limitNormalizado = clampLimit(limit, { defaultLimit: 30, max: 100 });
   const estadoNormalizado = String(estadoTrabajo || "TODOS").trim().toUpperCase();
   const params = [];
   const where = [];
@@ -1618,7 +1649,7 @@ export const updateEstadoOrdenAutolavado = async (
 };
 
 export const getOrdenesReparacion = async ({ estadoTrabajo = "TODOS", limit = 30 } = {}) => {
-  const limitNormalizado = Math.min(100, Math.max(1, Number(limit) || 30));
+  const limitNormalizado = clampLimit(limit, { defaultLimit: 30, max: 100 });
   const estadoNormalizado = String(estadoTrabajo || "TODOS").trim().toUpperCase();
   const params = [];
   const where = [];

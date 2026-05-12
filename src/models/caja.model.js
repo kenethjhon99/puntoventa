@@ -1,4 +1,5 @@
 import { pool } from "../config/db.js";
+import { clampPage, clampLimit } from "../utils/pagination.js";
 
 const toNumber = (value) => Number(Number(value || 0).toFixed(2));
 
@@ -218,6 +219,10 @@ export const abrirCaja = async ({
   monto_apertura,
   observaciones_apertura,
 }) => {
+  // Check informativo. La proteccion REAL contra carrera viene del
+  // partial unique index `uq_caja_sesion_abierta_usuario` en la DB:
+  // si dos requests intentan abrir caja simultaneamente, una gana y
+  // la otra recibe error 23505 (que capturamos abajo).
   const existente = await getCajaSesionActiva(id_usuario);
   if (existente) {
     throw new Error("Ya existe una caja abierta para este usuario");
@@ -228,28 +233,37 @@ export const abrirCaja = async ({
     throw new Error("monto_apertura debe ser un numero mayor o igual a 0");
   }
 
-  const result = await pool.query(
-    `
-      INSERT INTO "Caja_sesion" (
-        id_usuario,
-        id_sucursal,
-        monto_apertura,
-        observaciones_apertura,
-        created_by,
-        updated_by
-      )
-      VALUES ($1, $2, $3, $4, $1, $1)
-      RETURNING *
-    `,
-    [
-      Number(id_usuario),
-      Number(id_sucursal || 1),
-      toNumber(monto),
-      observaciones_apertura || null,
-    ]
-  );
+  try {
+    const result = await pool.query(
+      `
+        INSERT INTO "Caja_sesion" (
+          id_usuario,
+          id_sucursal,
+          monto_apertura,
+          observaciones_apertura,
+          created_by,
+          updated_by
+        )
+        VALUES ($1, $2, $3, $4, $1, $1)
+        RETURNING *
+      `,
+      [
+        Number(id_usuario),
+        Number(id_sucursal || 1),
+        toNumber(monto),
+        observaciones_apertura || null,
+      ]
+    );
 
-  return result.rows[0];
+    return result.rows[0];
+  } catch (e) {
+    // Race lost contra el partial unique index. Reportamos el mismo
+    // mensaje de negocio que el check de arriba para consistencia.
+    if (e.code === "23505") {
+      throw new Error("Ya existe una caja abierta para este usuario");
+    }
+    throw e;
+  }
 };
 
 export const listarSesionesCaja = async ({
@@ -259,8 +273,8 @@ export const listarSesionesCaja = async ({
   page = 1,
   limit = 10,
 }) => {
-  const safePage = Math.max(1, Number(page) || 1);
-  const safeLimit = Math.min(100, Math.max(1, Number(limit) || 10));
+  const safePage = clampPage(page);
+  const safeLimit = clampLimit(limit, { defaultLimit: 10, max: 100 });
   const offset = (safePage - 1) * safeLimit;
   const params = [];
   const where = [];
@@ -570,11 +584,7 @@ export const registrarMovimientoCaja = async ({
   autorizado_por_admin_id,
   autorizacion_admin_nota = null,
 }) => {
-  const sesion = await getCajaSesionById(id_caja_sesion);
-  if (!sesion || sesion.estado !== "ABIERTA") {
-    throw new Error("La caja indicada no esta abierta");
-  }
-
+  // Validaciones que NO necesitan tocar la DB primero.
   const tipoNormalizado = String(tipo || "").trim().toUpperCase();
   if (!["INGRESO", "EGRESO"].includes(tipoNormalizado)) {
     throw new Error("tipo debe ser INGRESO o EGRESO");
@@ -591,49 +601,79 @@ export const registrarMovimientoCaja = async ({
       ? Number(autorizado_por_admin_id)
       : null;
 
-  const result = await pool.query(
-    `
-      INSERT INTO "Caja_movimiento" (
-        id_caja_sesion,
-        id_usuario,
-        tipo,
-        categoria,
-        monto,
-        descripcion,
-        autorizado_por_admin_id,
-        autorizado_por_admin_en,
-        autorizacion_admin_nota,
-        created_by,
-        updated_by
-      )
-      VALUES (
-        $1,
-        $2,
-        $3,
-        $4,
-        $5,
-        $6,
-        $7::integer,
-        CASE WHEN $7::integer IS NOT NULL THEN now() ELSE NULL END,
-        $8::text,
-        $2,
-        $2
-      )
-      RETURNING *
-    `,
-    [
-      Number(id_caja_sesion),
-      Number(id_usuario),
-      tipoNormalizado,
-      categoria || null,
-      toNumber(montoNormalizado),
-      descripcion || null,
-      adminAutorizadorId,
-      autorizacion_admin_nota || null,
-    ]
-  );
+  // Transaccion + SELECT FOR UPDATE: garantiza que la sesion siga
+  // ABIERTA al momento del INSERT. Sin esto, un cerrarCaja concurrente
+  // podia colarse entre el check y el INSERT y aceptabamos un movimiento
+  // contra una sesion ya cerrada.
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
 
-  return result.rows[0];
+    const sesionResult = await client.query(
+      `
+        SELECT id_caja_sesion, estado
+        FROM "Caja_sesion"
+        WHERE id_caja_sesion = $1
+        FOR UPDATE
+      `,
+      [Number(id_caja_sesion)]
+    );
+
+    const sesion = sesionResult.rows[0];
+    if (!sesion || sesion.estado !== "ABIERTA") {
+      throw new Error("La caja indicada no esta abierta");
+    }
+
+    const result = await client.query(
+      `
+        INSERT INTO "Caja_movimiento" (
+          id_caja_sesion,
+          id_usuario,
+          tipo,
+          categoria,
+          monto,
+          descripcion,
+          autorizado_por_admin_id,
+          autorizado_por_admin_en,
+          autorizacion_admin_nota,
+          created_by,
+          updated_by
+        )
+        VALUES (
+          $1,
+          $2,
+          $3,
+          $4,
+          $5,
+          $6,
+          $7::integer,
+          CASE WHEN $7::integer IS NOT NULL THEN now() ELSE NULL END,
+          $8::text,
+          $2,
+          $2
+        )
+        RETURNING *
+      `,
+      [
+        Number(id_caja_sesion),
+        Number(id_usuario),
+        tipoNormalizado,
+        categoria || null,
+        toNumber(montoNormalizado),
+        descripcion || null,
+        adminAutorizadorId,
+        autorizacion_admin_nota || null,
+      ]
+    );
+
+    await client.query("COMMIT");
+    return result.rows[0];
+  } catch (e) {
+    await client.query("ROLLBACK");
+    throw e;
+  } finally {
+    client.release();
+  }
 };
 
 export const validarNoCobroPendienteCaja = async ({
@@ -794,6 +834,10 @@ export const cerrarCaja = async ({
     throw new Error("La caja no esta cuadrada. Debes autorizar el cierre con la password de un admin");
   }
 
+  // El UPDATE incluye `AND estado='ABIERTA'` para que sea atomico:
+  // si otra request cerro esta caja entre nuestro check y nuestro UPDATE,
+  // rowCount viene 0 y lo detectamos como conflicto. Sin esa clausula,
+  // dos cierres concurrentes podian sobreescribirse el monto_cierre.
   const result = await pool.query(
     `
       UPDATE "Caja_sesion"
@@ -809,6 +853,7 @@ export const cerrarCaja = async ({
         diferencia_validacion_nota = $6::text,
         updated_by = $7
       WHERE id_caja_sesion = $8
+        AND estado = 'ABIERTA'
       RETURNING *
     `,
     [
@@ -822,6 +867,10 @@ export const cerrarCaja = async ({
       Number(id_caja_sesion),
     ]
   );
+
+  if (result.rowCount === 0) {
+    throw new Error("La caja ya fue cerrada por otro proceso");
+  }
 
   return result.rows[0];
 };

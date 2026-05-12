@@ -8,6 +8,7 @@ import {
 import {
   getBodegasLogicas,
 } from "./bodega.model.js";
+import { clampPage, clampLimit } from "../utils/pagination.js";
 
 const folioSql = `('T-' || LPAD(t.id_traslado::text, 5, '0'))`;
 
@@ -44,9 +45,13 @@ const assertTrasladoPair = (origenKey, destinoKey) => {
 
 export const listarBodegasTraslado = async () => {
   const bodegas = await getBodegasLogicas();
+  // getBodegasLogicas devuelve filas con `nombre_bodega` (UPPER + TRIM
+  // del nombre real). El filter previo leia `bodega.bodega_key`, que
+  // no existe en el resultado: funcionaba por casualidad porque
+  // normalizeBodegaKey(undefined) cae al fallback BODEGA_GENERAL.
   return bodegas.filter((bodega) =>
     [BODEGA_GENERAL, BODEGA_TIENDA_TALLER].includes(
-      normalizeBodegaKey(bodega.bodega_key)
+      normalizeBodegaKey(bodega.nombre_bodega)
     )
   );
 };
@@ -130,8 +135,8 @@ export const listarTraslados = async (filters = {}) => {
     sortDir = "desc",
   } = filters;
 
-  const safePage = Math.max(1, Number(page) || 1);
-  const safeLimit = Math.min(100, Math.max(1, Number(limit) || 20));
+  const safePage = clampPage(page);
+  const safeLimit = clampLimit(limit, { defaultLimit: 20, max: 100 });
   const offset = (safePage - 1) * safeLimit;
   const safeSortBy = ALLOWED_SORT.has(sortBy) ? sortBy : "fecha";
   const safeSortDir = String(sortDir).toLowerCase() === "asc" ? "ASC" : "DESC";

@@ -2,11 +2,12 @@ import { Router } from "express";
 import { register, login } from "../controllers/auth.controller.js";
 import { auth } from "../middlewares/auth.js";
 import { requireRole } from "../middlewares/requireRole.js";
+import { loginRateLimiter } from "../middlewares/rateLimit.js";
 
 const router = Router();
 
 router.post("/register", auth, requireRole("SUPER_ADMIN"), register);
-router.post("/login", login);
+router.post("/login", loginRateLimiter, login);
 
 export default router;
 /* modificar base de datos para los estados de auditoria y comenzar modulo de ventas  Te falta para auditoría:

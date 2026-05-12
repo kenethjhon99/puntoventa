@@ -1,4 +1,5 @@
 import { pool } from "../config/db.js";
+import { clampPage, clampLimit } from "../utils/pagination.js";
 
 const round2 = (n) => Number((Number(n) || 0).toFixed(2));
 
@@ -212,8 +213,8 @@ export const listarCompras = async (filters) => {
     sortDir = "desc",
   } = filters;
 
-  const safePage = Math.max(1, Number(page) || 1);
-  const safeLimit = Math.min(100, Math.max(1, Number(limit) || 20));
+  const safePage = clampPage(page);
+  const safeLimit = clampLimit(limit, { defaultLimit: 20, max: 100 });
   const offset = (safePage - 1) * safeLimit;
 
   const safeSortBy = ALLOWED_SORT.has(sortBy) ? sortBy : "fecha";

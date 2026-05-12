@@ -1,5 +1,6 @@
 import { pool } from "../config/db.js";
 import { calculateDiscountedSaleLine, normalizeDiscountPercentage } from "../utils/ventaDiscount.js";
+import { clampPage, clampLimit } from "../utils/pagination.js";
 import {
   insertCreditoEnTx,
   marcarCreditoAnuladoEnTx,
@@ -728,8 +729,8 @@ export const listarVentas = async (filters) => {
     sortDir = "desc",
   } = filters;
 
-  const safePage = Math.max(1, Number(page) || 1);
-  const safeLimit = Math.min(100, Math.max(1, Number(limit) || 20));
+  const safePage = clampPage(page);
+  const safeLimit = clampLimit(limit, { defaultLimit: 20, max: 100 });
   const offset = (safePage - 1) * safeLimit;
 
   const safeSortBy = ALLOWED_SORT.has(sortBy) ? sortBy : "fecha";

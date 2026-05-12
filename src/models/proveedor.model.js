@@ -24,12 +24,17 @@ const SELECT_COLUMNS = `
   NULL::text AS telefono_viajero
 `;
 
+// Safety cap (10000) en ambos listados: techo defensivo contra DoS
+// si la tabla crece descontroladamente. El cliente recibe arrays
+// completos como antes; si en algun momento se acerca al techo,
+// migrar a paginacion ?page+?limit.
 export const getProveedoresActivos = async () => {
   const result = await pool.query(`
     SELECT ${SELECT_COLUMNS}
     FROM "Proveedor"
     WHERE estado = true
     ORDER BY nombre ASC
+    LIMIT 10000
   `);
 
   return result.rows;
@@ -42,6 +47,7 @@ export const getProveedores = async ({ incluirInactivos = false } = {}) => {
       FROM "Proveedor"
       WHERE $1::boolean = true OR estado = true
       ORDER BY estado DESC, nombre ASC
+      LIMIT 10000
     `,
     [incluirInactivos]
   );

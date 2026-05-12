@@ -11,7 +11,22 @@ import { requireRole } from "../middlewares/requireRole.js";
 
 const router = Router();
 
-router.get("/", auth, listarProductos);
+// Listado de productos: lo consumen casi todos los modulos operativos
+// (ventas, servicios, inventario). Lista explicita de roles para que
+// si en el futuro se crea un rol nuevo no tenga acceso automatico.
+router.get(
+  "/",
+  auth,
+  requireRole(
+    "SUPER_ADMIN",
+    "ADMIN",
+    "CAJERO",
+    "MECANICO",
+    "ENCARGADO_SERVICIOS",
+    "LECTURA"
+  ),
+  listarProductos
+);
 router.get(
   "/codigo-barras/generar",
   auth,

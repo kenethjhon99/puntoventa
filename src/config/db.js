@@ -239,21 +239,45 @@ const ensureUpdatedAtTriggerForTable = async (tableName) => {
       END IF;
     END $$;
   `);
+};
 
-  // Reconciliar traslados historicos realizados antes de la correccion
-  // de visibilidad por bodega.
-  //
-  // Caso a reparar:
-  // - un producto catalogo GENERAL fue trasladado a TIENDA_TALLER
-  // - una migracion vieja lo devolvio a GENERAL por catalogo
-  // - hoy el historial existe, pero el stock no refleja ese saldo
-  //
-  // Regla:
-  // - calcular el saldo neto trasladado hacia TIENDA_TALLER
-  // - si el stock actual en TIENDA_TALLER es menor a ese saldo,
-  //   mover solo la diferencia desde GENERAL
-  // - nunca duplicar stock
-  // - nunca mover mas de lo disponible en GENERAL
+// ---------------------------------------------------------------------
+// Reconciliar traslados historicos realizados antes de la correccion
+// de visibilidad por bodega.
+//
+// Caso a reparar:
+// - un producto catalogo GENERAL fue trasladado a TIENDA_TALLER
+// - una migracion vieja lo devolvio a GENERAL por catalogo
+// - hoy el historial existe, pero el stock no refleja ese saldo
+//
+// Regla:
+// - calcular el saldo neto trasladado hacia TIENDA_TALLER
+// - si el stock actual en TIENDA_TALLER es menor a ese saldo,
+//   mover solo la diferencia desde GENERAL
+// - nunca duplicar stock
+// - nunca mover mas de lo disponible en GENERAL
+//
+// NOTA: este codigo vivia DENTRO de ensureUpdatedAtTriggerForTable, lo
+// que lo ejecutaba 15+ veces y, peor, durante el bootstrap inicial
+// fallaba con "no existe la relacion traslado" porque corria antes del
+// CREATE TABLE traslado. Ahora es una funcion propia que:
+//   1. Solo corre una vez, al final de ensureSchema.
+//   2. Tiene un guard: si las tablas no existen aun, retorna early.
+// ---------------------------------------------------------------------
+const reconcileTrasladosHistoricos = async () => {
+  const guard = await pool.query(`
+    SELECT
+      EXISTS (SELECT 1 FROM information_schema.tables
+              WHERE table_schema = 'public' AND table_name = 'traslado')
+      AND EXISTS (SELECT 1 FROM information_schema.tables
+                  WHERE table_schema = 'public' AND table_name = 'traslado_detalle')
+      AS ok
+  `);
+  if (!guard.rows[0]?.ok) {
+    console.log("[reconcileTrasladosHistoricos] tablas traslado(_detalle) no existen aun, skip");
+    return;
+  }
+
   await pool.query(`
     WITH logical_bodegas AS (
       SELECT
@@ -2168,6 +2192,11 @@ export async function ensureSchema() {
   `);
 
   await ensureBootstrapUser();
+
+  // Reconciliacion de stock de traslados historicos. Va al final
+  // porque depende de que las tablas traslado y traslado_detalle
+  // existan (creadas en este mismo ensureSchema mas arriba).
+  await reconcileTrasladosHistoricos();
 }
 
 export async function testDB() {

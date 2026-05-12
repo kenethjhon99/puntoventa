@@ -1,5 +1,6 @@
 import { pool } from "../config/db.js";
 import { calcularFechaCobro, toIsoDate } from "../utils/calcularFechaCobro.js";
+import { clampPage, clampLimit } from "../utils/pagination.js";
 
 const SELECT_CREDITO = `
   SELECT
@@ -163,8 +164,8 @@ export const listarCreditos = async (filters = {}) => {
 
   const whereSql = where.length ? `WHERE ${where.join(" AND ")}` : "";
 
-  const page = Math.max(1, Number(filters.page) || 1);
-  const limit = Math.min(200, Math.max(1, Number(filters.limit) || 25));
+  const page = clampPage(filters.page);
+  const limit = clampLimit(filters.limit, { defaultLimit: 25, max: 200 });
   const offset = (page - 1) * limit;
 
   const countResult = await pool.query(

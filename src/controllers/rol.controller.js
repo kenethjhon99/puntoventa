@@ -1,10 +1,10 @@
 import * as Rol from "../models/rol.model.js";
+import { asyncHandler } from "../utils/asyncHandler.js";
 
-export const listarRoles = async (req, res) => {
-  try {
-    const roles = await Rol.getRoles();
-    res.json(roles);
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
-};
+// Ejemplo de uso de asyncHandler: el error se delega al handler global
+// de app.js, que en produccion devuelve mensaje generico + requestId,
+// y en desarrollo el mensaje original. Sin try/catch local.
+export const listarRoles = asyncHandler(async (req, res) => {
+  const roles = await Rol.getRoles();
+  res.json(roles);
+});

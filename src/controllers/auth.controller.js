@@ -6,6 +6,7 @@ import {
   validatePasswordPolicy,
   verifyPasswordWithUpgrade,
 } from "../utils/password.js";
+import { logger } from "../utils/logger.js";
 
 const getFechaInicioDefault = (fechaInicio) => {
   if (fechaInicio) return fechaInicio;
@@ -19,6 +20,40 @@ const signToken = (payload) => {
   return jwt.sign(payload, process.env.JWT_SECRET, {
     expiresIn: process.env.JWT_EXPIRES || "8h",
   });
+};
+
+// ---------------------------------------------------------------------
+// Audit log de intentos de login.
+//
+// Va a stdout (lo capturan los logs del proceso). Sirve para:
+//   - Detectar bursts de fallos = posible ataque de fuerza bruta.
+//   - Investigar logins desde IPs sospechosas.
+//   - Auditar quien entro y cuando.
+//
+// Nunca incluye la password ni el JWT. Solo metadata.
+// ---------------------------------------------------------------------
+const logLoginAttempt = ({ outcome, username, reason, req, userId }) => {
+  // req.ip respeta `trust proxy`: con TRUST_PROXY seteado vemos la IP
+  // real del cliente, no la del proxy.
+  const ip = req?.ip || req?.socket?.remoteAddress || null;
+  const userAgent = String(req?.headers?.["user-agent"] || "")
+    .replace(/\s+/g, " ");
+
+  const fields = {
+    outcome,
+    username: username ?? null,
+    user_id: userId ?? null,
+    reason: reason ?? null,
+    ip,
+    user_agent: userAgent || null,
+  };
+
+  // Fallos van como warn (los SIEM suelen tratar warn+ como alertable).
+  if (outcome === "success") {
+    logger.info("login_attempt", fields);
+  } else {
+    logger.warn("login_attempt", fields);
+  }
 };
 
 export const register = async (req, res) => {
@@ -118,16 +153,44 @@ export const register = async (req, res) => {
 };
 
 export const login = async (req, res) => {
-  try {
-    const { username, password } = req.body;
+  const usernameRaw = String(req.body?.username || "").trim();
 
-    if (!username || !password) {
+  try {
+    const { password } = req.body;
+
+    if (!usernameRaw || !password) {
+      logLoginAttempt({
+        outcome: "fail",
+        username: usernameRaw,
+        reason: "missing_fields",
+        req,
+      });
       return res.status(400).json({ error: "username y password son requeridos" });
     }
 
-    const user = await Auth.getUsuarioByUsername(username.trim());
-    if (!user) return res.status(401).json({ error: "Credenciales incorrectas" });
-    if (!user.activo) return res.status(403).json({ error: "Usuario inactivo" });
+    const user = await Auth.getUsuarioByUsername(usernameRaw);
+    if (!user) {
+      // Importante: mismo mensaje y mismo statusCode tanto para
+      // "usuario no existe" como para "password incorrecto". Si
+      // diferenciamos, un atacante puede enumerar usernames validos.
+      logLoginAttempt({
+        outcome: "fail",
+        username: usernameRaw,
+        reason: "unknown_user",
+        req,
+      });
+      return res.status(401).json({ error: "Credenciales incorrectas" });
+    }
+    if (!user.activo) {
+      logLoginAttempt({
+        outcome: "fail",
+        username: usernameRaw,
+        reason: "inactive_user",
+        req,
+        userId: user.id_usuario,
+      });
+      return res.status(403).json({ error: "Usuario inactivo" });
+    }
 
     const ok = await verifyPasswordWithUpgrade({
       plainPassword: password,
@@ -140,7 +203,16 @@ export const login = async (req, res) => {
         );
       },
     });
-    if (!ok) return res.status(401).json({ error: "Credenciales incorrectas" });
+    if (!ok) {
+      logLoginAttempt({
+        outcome: "fail",
+        username: usernameRaw,
+        reason: "bad_password",
+        req,
+        userId: user.id_usuario,
+      });
+      return res.status(401).json({ error: "Credenciales incorrectas" });
+    }
 
     const roles = await Auth.getRolesByUsuario(user.id_usuario);
 
@@ -148,6 +220,13 @@ export const login = async (req, res) => {
       id_usuario: user.id_usuario,
       username: user.username,
       roles: roles.map((r) => String(r.nombre_rol).trim().toUpperCase()),
+    });
+
+    logLoginAttempt({
+      outcome: "success",
+      username: usernameRaw,
+      req,
+      userId: user.id_usuario,
     });
 
     return res.json({
@@ -161,6 +240,12 @@ export const login = async (req, res) => {
       },
     });
   } catch (error) {
+    logLoginAttempt({
+      outcome: "error",
+      username: usernameRaw,
+      reason: "exception",
+      req,
+    });
     return res.status(500).json({ error: error.message });
   }
 };
